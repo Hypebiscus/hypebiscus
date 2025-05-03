@@ -191,3 +191,17 @@ p {
   font-family: Inter, sans-serif;
   font-weight: 400;
 }
+
+/* Custom Wallet Adapter Styles */
+.wallet-adapter-dropdown-list {
+  background-color: var(--background) !important;
+}
+
+.wallet-adapter-dropdown-list-item {
+  font-family: var(--font-sans) !important;
+}
+
+.wallet-adapter-dropdown-list-item:hover {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+}
