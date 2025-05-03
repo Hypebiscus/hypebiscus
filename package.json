@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.1",
     "@phosphor-icons/react": "^2.1.7",
     "@radix-ui/react-dialog": "^1.1.11",
     "@radix-ui/react-slot": "^1.2.0",
