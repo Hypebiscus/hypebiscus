@@ -1,4 +1,4 @@
-// src/lib/formatters.ts
+// src/lib/api/formatters.ts
 import { PoolsResponse, Pool } from './pools';
 
 /**
@@ -11,6 +11,9 @@ export const formatPoolData = (searchTerm: string, data: PoolsResponse): string 
   let formattedMessage = `Here are the ${searchTerm.toUpperCase()} pools I found:\n\n`;
   
   if (data.groups && data.groups.length > 0) {
+    // Include a note about the "Add Liquidity" buttons
+    formattedMessage += `You can interact with these pools using the buttons below each pool listing.\n\n`;
+    
     data.groups.forEach((group: { name: any; pairs: Pool[]; }) => {
       formattedMessage += `**${group.name} Pools**\n\n`;
       
