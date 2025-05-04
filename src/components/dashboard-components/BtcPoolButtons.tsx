@@ -3,7 +3,7 @@
 
 import { Button } from "@/components/ui/button";
 // Using Lucide icons since they're already in the project
-import { Bitcoin } from "lucide-react";
+import { Bitcoin, Search } from "lucide-react";
 
 interface BtcPoolButtonsProps {
   onFetchPools: (searchTerm: string) => void;
@@ -37,6 +37,16 @@ const BtcPoolButtons: React.FC<BtcPoolButtonsProps> = ({
         >
           <Bitcoin height="fill" className="w-4 h-4 mr-1" />
           zBTC-SOL Pools
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => onFetchPools('btc')}
+          disabled={isLoading}
+          className="text-xs"
+        >
+          <Search height="fill" className="w-4 h-4 mr-1" />
+          All BTC Pools
         </Button>
       </div>
     </div>
