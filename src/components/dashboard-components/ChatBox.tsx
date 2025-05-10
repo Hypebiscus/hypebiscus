@@ -2,7 +2,6 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SendHorizontal, Loader2 } from "lucide-react";
@@ -39,6 +38,12 @@ interface Pool {
   apy: string;
   fees24h: string;
   volume24h: string;
+  // Optional enhanced data
+  estimatedDailyEarnings?: string;
+  investmentAmount?: string;
+  riskLevel?: string;
+  reasons?: string[];
+  risks?: string[];
 }
 
 // Component implementation
@@ -92,51 +97,89 @@ const ChatBox: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // If this is a quick action or regular chat message - skip DLMM parsing
-      // Only parse as DLMM command if it's from the text input (not from quick actions)
-      let isDlmmCommand = false;
-      let commandResult;
 
-      if (!message) {
-        // Only check for DLMM command if not a quick action
-        commandResult = await parseDlmmCommand({
-          command: userMessage,
-          userPublicKey: publicKey || undefined,
-          service: {
-            dlmm: dlmmService,
-            position: positionService,
-          },
-        });
+      // ------------------------------------------------------------
+      // Check if message is about finding pools/recommendations
+      const lowerCaseMessage = userMessage.toLowerCase();
+      
+      // Enhanced query detection pattern to recognize various pool/yield questions
+      if (
+        // Pool finding patterns
+        lowerCaseMessage.includes("find") && (lowerCaseMessage.includes("pool") || lowerCaseMessage.includes("liquidity")) ||
+        lowerCaseMessage.includes("show") && (lowerCaseMessage.includes("pool") || lowerCaseMessage.includes("liquidity")) ||
+        lowerCaseMessage.includes("recommend") || 
+        lowerCaseMessage.includes("best pool") ||
+        lowerCaseMessage.includes("highest yield") ||
+        lowerCaseMessage.includes("best yield") ||
+        lowerCaseMessage.includes("best liquidity") ||
+        lowerCaseMessage.includes("high tvl") ||
+        
+        // Questions about what to invest in
+        lowerCaseMessage.includes("invest") && lowerCaseMessage.includes("where") ||
+        lowerCaseMessage.includes("what") && lowerCaseMessage.includes("pool") ||
+        
+        // Direct pool requests
+        lowerCaseMessage.includes("btc pool") ||
+        lowerCaseMessage.includes("bitcoin pool") ||
+        
+        // LP terminology
+        lowerCaseMessage.includes("lp ") ||
+        lowerCaseMessage.includes("liquidity pool") ||
+        lowerCaseMessage.includes("liquidity provision")
+      ) {
+        console.log("Detected pool query:", lowerCaseMessage);
+        await showBestYieldPool(selectedPortfolioStyle || 'conservative');
+      } else {
 
-        // If the command was processed successfully
-        if (
-          commandResult.type !== CommandType.UNKNOWN ||
-          commandResult.message
-        ) {
-          isDlmmCommand = true;
-          addMessage(
-            "assistant",
-            commandResult.message ||
-              "I'm not sure how to process that DLMM command."
-          );
+        // ------------------------------------------------------------
+        // If this is a quick action or regular chat message - skip DLMM parsing
+        // Only parse as DLMM command if it's from the text input (not from quick actions)
+        let isDlmmCommand = false;
+        let commandResult;
+
+        if (!message) {
+          // Only check for DLMM command if not a quick action
+          commandResult = await parseDlmmCommand({
+            command: userMessage,
+            userPublicKey: publicKey || undefined,
+            service: {
+              dlmm: dlmmService,
+              position: positionService,
+            },
+          });
+
+          // If the command was processed successfully
+          if (
+            commandResult.type !== CommandType.UNKNOWN ||
+            commandResult.message
+          ) {
+            isDlmmCommand = true;
+            addMessage(
+              "assistant",
+              commandResult.message ||
+                "I'm not sure how to process that DLMM command."
+            );
+          }
         }
-      }
 
-      // If not a DLMM command or it's a quick action, process as a regular message
-      if (!isDlmmCommand || message) {
-        const messageHistory = [
-          ...messages,
-          {
-            role: "user",
-            content: userMessage,
-            timestamp: new Date(),
-          },
-        ];
+        // If not a DLMM command or it's a quick action, process as a regular message
+        if (!isDlmmCommand || message) {
+          const messageHistory = [
+            ...messages,
+            {
+              role: "user",
+              content: userMessage,
+              timestamp: new Date(),
+            },
+          ];
 
-        // Send to API
-        const response = await fetchMessage(messageHistory);
-        addMessage("assistant", response);
+          // Send to API
+          const response = await fetchMessage(messageHistory);
+          addMessage("assistant", response);
+        }
+        // ------------------------------------------------------------
       }
+      // ------------------------------------------------------------
     } catch (error) {
       console.error("Error sending message:", error);
       addErrorMessage(error);
@@ -165,14 +208,210 @@ const ChatBox: React.FC = () => {
   // Handle portfolio style selection
   const handleSelectPortfolioStyle = (style: string) => {
     setSelectedPortfolioStyle(style);
-    // Add a message to the chat about the selected style
-    addMessage(
-      "assistant",
-      `You've selected the ${
-        style.charAt(0).toUpperCase() + style.slice(1)
-      } portfolio style. I'll recommend pools that match your risk preference.`
-    );
+    
+    // Only add a message if we're not in the welcome screen
+    if (!showWelcomeScreen) {
+      addMessage(
+        "assistant",
+        `You've selected the ${
+          style.charAt(0).toUpperCase() + style.slice(1)
+        } portfolio style. I'll recommend pools that match your risk preference.`
+      );
+      // Show recommended pools based on portfolio style
+      showBestYieldPool(style);
+    } else {
+      // If we're on the welcome screen, hide it after selecting a portfolio style
+      setShowWelcomeScreen(false);
+      // Add the initial message after choosing a style from the welcome screen
+      addMessage(
+        "assistant",
+        `Welcome! You've selected the ${
+          style.charAt(0).toUpperCase() + style.slice(1)
+        } portfolio style. I'll recommend pools that match your risk preference. How can I help you today?`
+      );
+    }
   };
+  
+  // ------------------------------------------------------------
+
+  // Function to fetch and display the best yield pool
+  const showBestYieldPool = async (style: string) => {
+    setIsPoolLoading(true);
+    
+    try {
+      // Display a loading message - this will remain visible
+      addMessage(
+        "assistant",
+        `Finding the best ${style} Solana liquidity pools for you...`
+      );
+      
+      // Add a deliberate delay to show loading state (1.5 seconds)
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Use different search terms based on portfolio style
+      const searchTerms = style === 'conservative' 
+        ? ['wbtc-sol', 'wbtc-usdc', 'wbtc']  // Conservative: multiple stable btc options
+        : style === 'moderate' 
+          ? ['btc-usdc', 'btc-sol', 'btc']   // Moderate: balance of stability and return
+          : ['zbtc-sol', 'zbtc', 'btc'];     // Aggressive: higher yield options
+          
+      let allPools: any[] = [];
+      
+      // Fetch pools for each search term
+      for (const term of searchTerms) {
+        try {
+          console.log(`Fetching pools with search term: ${term}`);
+          const poolsData = await fetchPools(term);
+          
+          if (poolsData && poolsData.groups && poolsData.groups.length > 0) {
+            poolsData.groups.forEach((group: any) => {
+              if (group.pairs && group.pairs.length > 0) {
+                allPools = [...allPools, ...group.pairs];
+              }
+            });
+          }
+        } catch (error) {
+          console.error(`Error fetching pools for ${term}:`, error);
+          // Continue with next term
+        }
+      }
+      
+      if (allPools.length > 0) {
+        // Sort pools based on portfolio style
+        if (style === 'conservative') {
+          // Sort by TVL (liquidity) for conservative
+          allPools.sort((a, b) => parseFloat(b.liquidity) - parseFloat(a.liquidity));
+        } else if (style === 'moderate') {
+          // Sort by balance of TVL and APY for moderate
+          allPools.sort((a, b) => {
+            const scoreA = (parseFloat(a.liquidity) * 0.5) + (a.apy * 0.5);
+            const scoreB = (parseFloat(b.liquidity) * 0.5) + (b.apy * 0.5);
+            return scoreB - scoreA;
+          });
+        } else {
+          // Sort by APY for aggressive
+          allPools.sort((a, b) => b.apy - a.apy);
+        }
+        
+        // Take the top pool, but avoid showing the same one again
+        let selectedPool = allPools[0];
+        let poolIndex = 0;
+        
+        // Check if we already have this pool displayed and try to find a different one
+        const existingPoolAddresses = currentPools.map(p => p.address);
+        while (existingPoolAddresses.includes(selectedPool.address) && poolIndex < allPools.length - 1) {
+          poolIndex++;
+          selectedPool = allPools[poolIndex];
+        }
+        
+        // If we found a pool (either new or all are duplicates)
+        if (selectedPool) {
+          // Create formatted pool
+          const formattedPool = {
+            name: selectedPool.name,
+            address: selectedPool.address,
+            liquidity: formatCurrencyValue(selectedPool.liquidity, 0),
+            currentPrice: formatCurrencyValue(selectedPool.current_price, 2),
+            // Calculate APY based on 24h fees to TVL ratio instead of using the API's apy field
+            // This matches what Meteora displays as "24hr fee / TVL"
+            apy: ((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 100).toFixed(2) + "%",
+            fees24h: formatCurrencyValue(selectedPool.fees_24h, 2),
+            volume24h: formatCurrencyValue(selectedPool.trade_volume_24h, 0),
+            // Enhanced data for display
+            estimatedDailyEarnings: ((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 10000).toFixed(2),
+            investmentAmount: "10,000",
+            riskLevel: style,
+            reasons: [
+              // Style-specific first reason
+              style === 'conservative' 
+                ? `Deep liquidity — $${formatCurrencyValue(selectedPool.liquidity, 0)} locked in this pool minimizes slippage and provides capital stability.`
+                : style === 'moderate'
+                  ? `Balanced metrics — $${formatCurrencyValue(selectedPool.liquidity, 0)} TVL coupled with ${((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 100).toFixed(2)}% returns offers the ideal middle ground.`
+                  : `Revenue maximizer — ${((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 100).toFixed(2)}% annualized yield outperforms most alternatives in the ecosystem.`,
+              
+              // Volume-based reason
+              `Active trading — $${formatCurrencyValue(selectedPool.trade_volume_24h, 0)} daily volume indicates strong market participation and ease of exit.`,
+              
+              // Fee-based reason  
+              `Consistent revenue — $${formatCurrencyValue(selectedPool.fees_24h, 2)} collected in fees yesterday demonstrates real earning potential.`,
+              
+              // Trading activity reason
+              parseFloat(selectedPool.trade_volume_24h) > 1000000
+                ? "High demand trading pair — market participants heavily favor this asset combination."
+                : "Sustainable activity — trading frequency supports reliable returns without excessive volatility.",
+                
+              // Final recommendation reason
+              style === 'conservative' 
+                ? "Capital preservation focus — lower volatility profile aligns with your safety-first approach."
+                : style === 'moderate'
+                  ? "Growth with guardrails — this pool balances upside potential with downside protection."
+                  : "Opportunistic positioning — designed for investors seeking maximum capital appreciation."
+            ],
+            risks: [
+              // Market related risk
+              "Market dynamics vary — future performance may differ from historical data as trading conditions evolve.",
+              
+              // Impermanent loss risk with different wording
+              style === 'conservative'
+                ? "Price divergence impact — if token values change significantly relative to each other, returns may be affected by impermanent loss."
+                : style === 'moderate'
+                  ? "Asset correlation factor — substantial price differences between paired assets can impact expected returns."
+                  : "Volatility tradeoff — higher returns come with increased exposure to impermanent loss during market swings.",
+              
+              // Protocol/technical risk
+              "Protocol considerations — while thoroughly audited, all DeFi interactions carry inherent smart contract risk.",
+              
+              // Style-specific risk
+              style === 'conservative'
+                ? "Opportunity cost — selecting safety means potentially lower returns than more aggressive options."
+                : style === 'moderate'
+                  ? "Partial downside protection — moderate strategy provides some but not complete insulation from market downturns."
+                  : "Amplified movements — this pool may experience larger price fluctuations during market volatility."
+            ]
+          };
+          
+          // Show success message
+          addMessage(
+            "assistant",
+            `Found the optimal ${style} Solana Liquidity Pool for your portfolio.`
+          );
+          
+          // Keep existing pools and add the new one
+          // Use a different approach to persist pools across renders
+          if (existingPoolAddresses.includes(formattedPool.address)) {
+            // If we already have this pool, don't add it again
+            // but we keep the setCurrentPools call to trigger a re-render
+            setCurrentPools([...currentPools]);
+          } else {
+            // Add the new pool to existing ones
+            setCurrentPools([...currentPools, formattedPool]);
+          }
+        } else {
+          // No pools found after filtering
+          addMessage(
+            "assistant",
+            `I searched but couldn't find any suitable pools matching your ${style} portfolio style. Please try again later or adjust your preferences.`
+          );
+        }
+      } else {
+        // No pools found at all
+        addMessage(
+          "assistant",
+          `Sorry, I couldn't find any Bitcoin liquidity pools on Solana at the moment. Please try again later.`
+        );
+      }
+    } catch (error) {
+      console.error("Error in showBestYieldPool:", error);
+      addMessage(
+        "assistant",
+        `Sorry, there was an error finding pools: ${error instanceof Error ? error.message : "Unknown error"}. Please try again later.`
+      );
+    } finally {
+      setIsPoolLoading(false);
+    }
+  };
+
+  // ------------------------------------------------------------
 
   // Format time for display
   const formatTime = (date: Date) => {
@@ -204,13 +443,15 @@ const ChatBox: React.FC = () => {
     if (typeof value === "string") {
       const num = parseFloat(value);
       if (!isNaN(num)) {
-        return num.toFixed(2);
+        // Format as percentage with 2 decimal places
+        return num.toFixed(2) + "%";
       }
       return value;
     } else if (typeof value === "number") {
-      return value.toFixed(2);
+      // Format as percentage with 2 decimal places
+      return value.toFixed(2) + "%";
     }
-    return "0";
+    return "0%";
   };
 
   // Effects
