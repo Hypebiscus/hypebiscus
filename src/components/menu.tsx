@@ -26,7 +26,7 @@ const Menu = () => {
   ]
 
   return (
-    <div className="h-full flex flex-col justify-center items-center">
+    <div className="">
       <div className="bg-[#161616] rounded-full w-[48px] h-[184px] border-border flex flex-col justify-center items-center">
         <div className="flex flex-col gap-2">
           {menuItems.map((item, index) => {

@@ -248,7 +248,7 @@ const ChatBox: React.FC = () => {
 
   // Render component
   return (
-    <Card className="relative overflow-hidden h-[calc(100vh-200px)] flex flex-col">
+    <Card className="relative overflow-hidden h-[calc(100vh-200px)] flex flex-col lg:max-w-5xl max-w-full mx-auto">
       {/* Radial blur effect */}
       <div className="absolute -top-4 -left-4 w-[300px] h-[200px] opacity-30 pointer-events-none">
         <div className="absolute -top-4 -left-4 w-[200px] h-[200px] rounded-full bg-primary blur-[60px]"></div>
