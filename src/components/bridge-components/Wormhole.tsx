@@ -7,7 +7,7 @@ import WormholeConnect, {
 const Wormhole = () => {
     const config: WormholeConnectConfig = {
         network: 'Testnet',
-        chains: ['Ethereum', 'Solana'],
+        chains: ['Sui', 'Avalanche'],
         ui: {
             title: 'Hypebiscus',
         },
