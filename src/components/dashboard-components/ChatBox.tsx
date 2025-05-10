@@ -281,7 +281,7 @@ const ChatBox: React.FC = () => {
           </Button>
         </div>
       ) : (
-        <>
+        <div className="flex flex-col h-[calc(100vh-300px)]">
           {/* Portfolio Style Button (persistent) */}
           <div className="flex justify-end mb-10">
             <Button
@@ -299,7 +299,7 @@ const ChatBox: React.FC = () => {
           </div>
           
           {/* Messages area */}
-          <div className="flex-grow overflow-y-auto pb-4 space-y-4 scrollbar-hidden">
+          <div className="flex-grow overflow-y-auto pb-4 space-y-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
             {messages.map((message, index) => (
               <MessageBubble
                 key={index}
@@ -321,7 +321,7 @@ const ChatBox: React.FC = () => {
 
             <div ref={messagesEndRef} />
           </div>
-        </>
+        </div>
       )}
 
       {/* Quick Action Buttons and Chat Input */}
