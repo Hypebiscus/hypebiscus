@@ -8,7 +8,7 @@ interface PageTemplateProps {
 
 const PageTemplate = ({ children }: PageTemplateProps) => {
   return (
-    <div className="relative px-4 lg:px-[70px] lg:h-screen h-max overflow-hidden flex flex-col">
+    <div className="relative px-4 lg:px-[70px] h-screen flex flex-col">
       <div className="absolute top-4 left-[15vw] w-[400px] h-[300px] opacity-30 lg:block hidden">
         <div className="absolute top-4 left-[15vw] w-[300px] h-[300px] rounded-full bg-primary blur-[90px]"></div>
       </div>
