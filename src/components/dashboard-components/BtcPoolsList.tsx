@@ -1,9 +1,9 @@
 "use client";
 
-import React from 'react';
+import React from "react";
 import { Button } from "@/components/ui/button";
-import { useWallet } from '@solana/wallet-adapter-react';
-import { Bitcoin } from "lucide-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { ArrowSquareIn, Check } from "@phosphor-icons/react";
 
 interface Pool {
   name: string;
@@ -13,6 +13,12 @@ interface Pool {
   apy: string;
   fees24h: string;
   volume24h: string;
+  // Optional enhanced data
+  riskLevel?: string;
+  estimatedDailyEarnings?: string;
+  investmentAmount?: string;
+  reasons?: string[];
+  risks?: string[];
 }
 
 interface BtcPoolsListProps {
@@ -21,10 +27,10 @@ interface BtcPoolsListProps {
   isLoading: boolean;
 }
 
-const BtcPoolsList: React.FC<BtcPoolsListProps> = ({ 
-  pools, 
+const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
+  pools,
   onAddLiquidity,
-  isLoading 
+  isLoading,
 }) => {
   const { connected } = useWallet();
 
@@ -35,36 +41,133 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
   return (
     <div className="space-y-6 mt-4">
       {pools.map((pool, index) => (
-        <div key={index} className="bg-[#0f0f0f] rounded-lg border border-border overflow-hidden">
-          <div className="flex justify-between items-center p-3 bg-[#161616]">
-            <h4 className="text-white font-medium">{index + 1}. Pool: {pool.name}</h4>
-            <div className="flex items-center space-x-1 bg-secondary/30 px-2 py-1 rounded">
-              <Bitcoin className="h-4 w-4" />
+        <div key={index}>
+          {/* Pool Header */}
+          <div className="border border-primary rounded-2xl px-6 py-4">
+            <div className="flex justify-between items-center">
+              <h4 className="text-white font-bold text-lg">{pool.name}</h4>
+              <div className="flex flex-col items-end">
+                <span className="text-2xl font-bold">{pool.apy} </span>
+                <span className="text-sm text-white">24hr fee / TVL</span>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              {/* Pool Stats */}
+              <div className="flex gap-6">
+                <div>
+                  <div className="text-xs text-white/60">
+                    Total Value Locked
+                  </div>
+                  <div className="text-white font-semibold">
+                    ${pool.liquidity}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/60">Trading Volume</div>
+                  <div className="text-white font-semibold">
+                    ${pool.volume24h}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/60">24h Fee</div>
+                  <div className="text-white font-semibold">
+                    ${pool.fees24h}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center mt-6">
+              <div className="flex gap-2">
+                <span className="text-[#1BE3C2] bg-[#1be3c233] rounded-full px-4 py-1 font-semibold text-sm flex items-center gap-2">Audited <ArrowSquareIn size={16} /></span>
+                <span className=" bg-[#efb54b33] rounded-full px-4 py-1 font-semibold text-sm">
+                  Impermanent Loss Risk: <span className="text-[#EFB54B]">Moderate</span>
+                </span>
+              </div>
+              <div>
+                <Button
+                  variant="default"
+                  size="secondary"
+                  onClick={() => onAddLiquidity(pool)}
+                  disabled={!connected || isLoading}
+                  className="flex-1"
+                >
+                  {connected
+                    ? "Invest in this Pool"
+                    : "Connect Wallet to Invest"}
+                </Button>
+              </div>
             </div>
           </div>
-          
-          <div className="p-4">
-            <div className="flex flex-col space-y-1 text-sm text-white/80">
-              
-                <span>Liquidity: ${pool.liquidity}</span>
-              
-                <span>Current Price: ${pool.currentPrice}</span>
-              
-                <span>APY: {pool.apy}%</span>
-              
-                <span>24h Fees: ${pool.fees24h}</span>
-              
-                <span>24h Volume: ${pool.volume24h}</span>
+
+          {/* Estimated Earnings Section */}
+          {pool.estimatedDailyEarnings && (
+            <div className="mt-4 bg-secondary rounded-2xl p-4 w-fit">
+              <h5 className="text-primary text-base font-medium mb-2">
+                Your Estimated Earnings:
+              </h5>
+              <div className="flex flex-col">
+                <p className="text-base text-white flex items-center gap-2">
+                  Invest:{" "}
+                  <span className="text-white font-semibold text-base">
+                    ${pool.investmentAmount || "10,000"}
+                  </span>
+                </p>
+                <p className="text-base text-white flex items-center gap-2">
+                  Your Estimated Daily Earnings:{" "}
+                  <span className="text-white font-semibold text-base">
+                    ${pool.estimatedDailyEarnings}
+                  </span>
+                </p>
+              </div>
             </div>
-            
+          )}
+
+          {/* Why this pool section */}
+          {pool.reasons && pool.reasons.length > 0 && (
+            <div className="mt-4  bg-[#1be3c233] rounded-2xl p-4">
+              <h5 className="text-base  font-bold mb-4">
+                Why this pool?
+              </h5>
+              <div className="space-y-2">
+                {pool.reasons.map((reason, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <Check size={16} className="text-[#1BE3C2]" />
+                    <p className="text-base text-white">{reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Risk Notice */}
+          {pool.risks && pool.risks.length > 0 && (
             <div className="mt-4">
+              <p className="font-bold">Before You Dive In:</p>
+              <ul className="list-disc list-inside mt-1 space-y-1 text-base text-white font-normal">
+                {pool.risks.map((risk, i) => (
+                  <li key={i}>{risk}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="mt-4">
+            <div className="flex space-x-2">
               <Button
-                variant="default"
+                variant="outline"
                 size="sm"
-                onClick={() => onAddLiquidity(pool)}
-                disabled={!connected || isLoading}
+                onClick={() =>
+                  window.open(
+                    `https://app.meteora.ag/dlmm/${pool.address}`,
+                    "_blank"
+                  )
+                }
+                className="bg-transparent border-primary text-white"
               >
-                {connected ? 'Add Liquidity' : 'Connect Wallet to Add'}
+                View on Meteora
               </Button>
             </div>
           </div>
