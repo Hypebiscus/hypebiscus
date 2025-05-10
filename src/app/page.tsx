@@ -12,7 +12,7 @@ export default function Home() {
 
   return (
     <PageTemplate>
-      <div className="relative">
+      <div className="relative h-full flex flex-col">
         <div className="flex justify-end mb-4 lg:hidden">
           <Button
             variant="outline"
@@ -25,9 +25,9 @@ export default function Home() {
           </Button>
         </div>
 
-        <div className="w-full flex justify-between gap-4 relative overflow-hidden">
+        <div className="w-full lg:h-full lg:flex justify-between  gap-4 relative flex-grow overflow-hidden">
           <div 
-            className={`w-full transition-all duration-300 ease-in-out ${
+            className={`w-full h-full transition-all duration-300 ease-in-out ${
               showNewsOnMobile ? "opacity-0 translate-x-[-100%] absolute" : "opacity-100 translate-x-0"
             }`}
           >
