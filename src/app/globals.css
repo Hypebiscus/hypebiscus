@@ -166,6 +166,7 @@
   --shadow-2xl: var(--shadow-2xl);
 
   --menu-background: var(--menu-background);
+  --secondary-button-background: var(--secondary-button-background);
 }
 
 @layer base {
@@ -189,7 +190,6 @@ h2{
 
 p {
   font-family: Inter, sans-serif;
-  font-weight: 400;
 }
 
 /* Custom Wallet Adapter Styles */
@@ -204,4 +204,13 @@ p {
 .wallet-adapter-dropdown-list-item:hover {
   background-color: var(--primary) !important;
   color: #fff !important;
+}
+
+/* Add scrollbar-hide utility class at the end of the file */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
 }
