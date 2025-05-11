@@ -4,6 +4,21 @@ import { Connection, PublicKey, Keypair, Transaction } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
+// Interface definitions
+export interface BinArrayAccount {
+  publicKey: PublicKey;
+  // Add other properties as needed
+}
+
+// Interface for bin liquidity information
+export interface BinLiquidity {
+  binId: number;
+  xAmount: string;
+  yAmount: string;
+  liquidityAmount: string;
+  price: string;
+}
+
 // Interface for pool information
 export interface DlmmPoolInfo {
   address: string;
@@ -89,7 +104,6 @@ export class MeteoraDlmmService {
       const pools: DlmmPoolInfo[] = [];
       
       // Process the API response to extract pool information
-      // This is a simplified example, you may need to adjust based on actual API response
       for (const pool of data.pairs || []) {
         pools.push({
           address: pool.address,
@@ -114,7 +128,7 @@ export class MeteoraDlmmService {
    * Get active bin information for a pool
    * @param poolAddress Address of the DLMM pool
    */
-  async getActiveBin(poolAddress: string): Promise<any> {
+  async getActiveBin(poolAddress: string): Promise<{ binId: number; price: string }> {
     const pool = await this.initializePool(poolAddress);
     return await pool.getActiveBin();
   }
@@ -132,7 +146,7 @@ export class MeteoraDlmmService {
       const positions: DlmmPositionInfo[] = [];
       
       for (const position of userPositions) {
-        const bins = position.positionData.positionBinData.map(bin => ({
+        const bins = position.positionData.positionBinData.map((bin: any) => ({
           binId: bin.binId,
           xAmount: bin.xAmount.toString(),
           yAmount: bin.yAmount.toString(),
@@ -163,17 +177,22 @@ export class MeteoraDlmmService {
     try {
       const pool = await this.initializePool(poolAddress);
       
+      // Get bin arrays for swap
+      const binArrays = await pool.getBinArrayForSwap(swapForY);
+      
       // Get swap quote
-      const quote = await pool.getSwapQuote({
+      const quote = await pool.swapQuote(
         amountIn,
         swapForY,
-      });
+        new BN(1), // slippage bps (1 = 0.01%)
+        binArrays
+      );
       
       return {
-        amountIn: quote.amountIn.toString(),
-        amountOut: quote.amountOut.toString(),
+        amountIn: amountIn.toString(),
+        amountOut: quote.minOutAmount.toString(),
         fee: quote.fee.toString(),
-        priceImpact: quote.priceImpact.toString()
+        priceImpact: '0' // The actual price impact isn't directly available in the quote
       };
     } catch (error) {
       console.error('Error getting swap quote:', error);
@@ -199,12 +218,22 @@ export class MeteoraDlmmService {
     try {
       const pool = await this.initializePool(poolAddress);
       
+      // Determine input and output tokens
+      const inToken = swapForY ? pool.tokenX.publicKey : pool.tokenY.publicKey;
+      const outToken = swapForY ? pool.tokenY.publicKey : pool.tokenX.publicKey;
+      
+      // Get bin arrays for swap
+      const binArrays = await pool.getBinArrayForSwap(swapForY);
+      
       // Create swap transaction
       const swapTx = await pool.swap({
+        inToken,
+        binArraysPubkey: binArrays.map((arr: { publicKey: PublicKey }) => arr.publicKey),
+        inAmount: amountIn,
+        lbPair: pool.pubkey,
         user: userPublicKey,
-        amountIn,
-        minAmountOut,
-        swapForY,
+        minOutAmount: minAmountOut,
+        outToken,
       });
       
       return swapTx;

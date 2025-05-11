@@ -1,15 +1,15 @@
 // src/lib/meteora/meteoraPositionService.ts
 import DLMM, { StrategyType } from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { BN } from 'bn.js';
+import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 // Interface for position creation parameters
 export interface CreatePositionParams {
   poolAddress: string;
   userPublicKey: PublicKey;
-  totalXAmount: typeof BN;
-  totalYAmount: typeof BN;
+  totalXAmount: BN;
+  totalYAmount: BN;
   minBinId: number;
   maxBinId: number;
   strategyType: StrategyType;
@@ -60,7 +60,7 @@ export class MeteoraPositionService {
    * @returns Transaction and new position keypair
    */
   async createBalancedPosition(params: CreatePositionParams): Promise<{
-    transaction: Transaction;
+    transaction: Transaction | Transaction[];
     positionKeypair: Keypair;
   }> {
     try {
@@ -99,7 +99,7 @@ export class MeteoraPositionService {
     params: CreatePositionParams,
     useTokenX: boolean
   ): Promise<{
-    transaction: Transaction;
+    transaction: Transaction | Transaction[];
     positionKeypair: Keypair;
   }> {
     try {
@@ -144,12 +144,12 @@ export class MeteoraPositionService {
    */
   async addLiquidity(
     params: PositionManagementParams,
-    totalXAmount: typeof BN,
-    totalYAmount: typeof BN,
+    totalXAmount: BN,
+    totalYAmount: BN,
     minBinId: number,
     maxBinId: number,
     strategyType: StrategyType
-  ): Promise<Transaction> {
+  ): Promise<Transaction | Transaction[]> {
     try {
       const pool = await this.initializePool(params.poolAddress);
       
@@ -177,26 +177,30 @@ export class MeteoraPositionService {
   /**
    * Remove liquidity from a position
    * @param params Parameters for position management
-   * @param binIds Array of bin IDs to remove liquidity from
+   * @param fromBinId Starting bin ID to remove liquidity from
+   * @param toBinId Ending bin ID to remove liquidity from
    * @param percentages Array of percentages to remove from each bin (in basis points, 10000 = 100%)
    * @param shouldClaimAndClose Whether to claim fees and close the position
    * @returns Transaction for removing liquidity
    */
   async removeLiquidity(
     params: PositionManagementParams,
-    binIds: number[],
-    percentages: typeof BN[],
+    fromBinId: number,
+    toBinId: number,
+    percentages: BN[],
     shouldClaimAndClose: boolean
-  ): Promise<Transaction> {
+  ): Promise<Transaction | Transaction[]> {
     try {
       const pool = await this.initializePool(params.poolAddress);
       
       const positionPubKey = new PublicKey(params.positionPubkey);
       
+      // Update to use fromBinId and toBinId instead of binIds array
       const removeLiquidityTx = await pool.removeLiquidity({
         position: positionPubKey,
         user: params.userPublicKey,
-        binIds,
+        fromBinId,
+        toBinId,
         liquiditiesBpsToRemove: percentages,
         shouldClaimAndClose,
       });
@@ -219,9 +223,9 @@ export class MeteoraPositionService {
       
       const positionPubKey = new PublicKey(params.positionPubkey);
       
-      const claimFeeTx = await pool.claimFee({
+      const claimFeeTx = await pool.claimSwapFee({
+        owner: params.userPublicKey,
         position: positionPubKey,
-        user: params.userPublicKey,
       });
 
       return claimFeeTx;
@@ -243,8 +247,8 @@ export class MeteoraPositionService {
       const positionPubKey = new PublicKey(params.positionPubkey);
       
       const closePositionTx = await pool.closePosition({
+        owner: params.userPublicKey,
         position: positionPubKey,
-        user: params.userPublicKey,
       });
 
       return closePositionTx;
