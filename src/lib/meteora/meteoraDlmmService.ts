@@ -1,7 +1,7 @@
 // src/lib/meteora/meteoraDlmmService.ts
 import DLMM, { StrategyType } from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Keypair, Transaction } from '@solana/web3.js';
-import { BN } from 'bn.js';
+import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 // Interface for pool information
@@ -218,7 +218,11 @@ export class MeteoraDlmmService {
 // Create a hook to use the DLMM service
 export function useMeteoraDlmmService() {
   const { publicKey, sendTransaction } = useWallet();
-  const connection = new Connection('https://api.mainnet-beta.solana.com');
+  
+  // Use environment variable for RPC URL
+  const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+  const connection = new Connection(rpcUrl);
+  
   const service = new MeteoraDlmmService(connection);
 
   return {

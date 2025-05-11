@@ -8,8 +8,8 @@ import { useWallet } from '@solana/wallet-adapter-react';
 export interface CreatePositionParams {
   poolAddress: string;
   userPublicKey: PublicKey;
-  totalXAmount: BN;
-  totalYAmount: BN;
+  totalXAmount: typeof BN;
+  totalYAmount: typeof BN;
   minBinId: number;
   maxBinId: number;
   strategyType: StrategyType;
@@ -144,8 +144,8 @@ export class MeteoraPositionService {
    */
   async addLiquidity(
     params: PositionManagementParams,
-    totalXAmount: BN,
-    totalYAmount: BN,
+    totalXAmount: typeof BN,
+    totalYAmount: typeof BN,
     minBinId: number,
     maxBinId: number,
     strategyType: StrategyType
@@ -185,7 +185,7 @@ export class MeteoraPositionService {
   async removeLiquidity(
     params: PositionManagementParams,
     binIds: number[],
-    percentages: BN[],
+    percentages: typeof BN[],
     shouldClaimAndClose: boolean
   ): Promise<Transaction> {
     try {
@@ -258,7 +258,11 @@ export class MeteoraPositionService {
 // Hook to use the position service
 export function useMeteoraPositionService() {
   const { publicKey, sendTransaction } = useWallet();
-  const connection = new Connection('https://api.mainnet-beta.solana.com');
+  
+  // Use environment variable for RPC URL
+  const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+  const connection = new Connection(rpcUrl);
+  
   const service = new MeteoraPositionService(connection);
 
   return {

@@ -4,6 +4,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { ArrowSquareIn, Check } from "@phosphor-icons/react";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface Pool {
   name: string;
@@ -80,7 +81,24 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
 
             <div className="flex justify-between items-center mt-6">
               <div className="flex gap-2">
-                <span className="text-[#1BE3C2] bg-[#1be3c233] rounded-full px-4 py-1 font-semibold text-sm flex items-center gap-2">Audited <ArrowSquareIn size={16} /></span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-[#1BE3C2] bg-[#1be3c233] rounded-full px-4 py-1 font-semibold text-sm flex items-center gap-2 cursor-help">
+                      Audited <ArrowSquareIn size={16} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs bg-[#191919] border border-[#333] p-3 text-white">
+                    <p className="font-medium mb-2">Audited by:</p>
+                    <ul className="text-xs space-y-1">
+                      <li>• Offside Labs</li>
+                      <li>• Sec3 (formerly Soteria)</li>
+                      <li>• OtterSec</li>
+                      <li>• Quantstamp</li>
+                      <li>• Halborn</li>
+                      <li>• Oak</li>
+                    </ul>
+                  </TooltipContent>
+                </Tooltip>
                 <span className=" bg-[#efb54b33] rounded-full px-4 py-1 font-semibold text-sm">
                   Impermanent Loss Risk: <span className="text-[#EFB54B]">Moderate</span>
                 </span>
@@ -101,6 +119,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
             </div>
           </div>
 
+          {/* Rest of the component remains unchanged */}
           {/* Estimated Earnings Section */}
           {pool.estimatedDailyEarnings && (
             <div className="mt-4 bg-secondary rounded-2xl p-4 w-fit">
