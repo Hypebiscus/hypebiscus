@@ -250,10 +250,10 @@ const ChatBox: React.FC = () => {
       
       // Use different search terms based on portfolio style
       const searchTerms = style === 'conservative' 
-        ? ['wbtc-sol', 'wbtc-usdc', 'wbtc']  // Conservative: multiple stable btc options
+        ? ['wbtc-sol']                      // Conservative: only wBTC-SOL
         : style === 'moderate' 
-          ? ['btc-usdc', 'btc-sol', 'btc']   // Moderate: balance of stability and return
-          : ['zbtc-sol', 'zbtc', 'btc'];     // Aggressive: higher yield options
+          ? ['wbtc-sol', 'zbtc-sol']        // Moderate: both pairs for diversification
+          : ['zbtc-sol'];                   // Aggressive: only zBTC-SOL
           
       let allPools: any[] = [];
       
