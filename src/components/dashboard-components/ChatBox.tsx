@@ -87,106 +87,91 @@ const ChatBox: React.FC = () => {
   };
 
   const handleSendMessage = async (message?: string) => {
-    const messageToSend = message || inputMessage;
-    if (!messageToSend.trim()) return;
+  const messageToSend = message || inputMessage;
+  if (!messageToSend.trim()) return;
 
-    // Add user message
-    addMessage("user", messageToSend);
-    const userMessage = messageToSend;
-    setInputMessage("");
-    setIsLoading(true);
+  // Add user message
+  addMessage("user", messageToSend);
+  const userMessage = messageToSend;
+  setInputMessage("");
+  setIsLoading(true);
 
-    try {
+  try {
+    // Check if message is about finding pools/recommendations
+    const lowerCaseMessage = userMessage.toLowerCase();
+    
+    // Check if this is a quick action educational question about pools
+    const isEducationalPoolQuestion = 
+      (lowerCaseMessage.includes("what is") && 
+       (lowerCaseMessage.includes("pool") || lowerCaseMessage.includes("lp") || lowerCaseMessage.includes("liquidity"))) ||
+      (lowerCaseMessage.includes("how does") && lowerCaseMessage.includes("work")) ||
+      lowerCaseMessage.includes("why solana") ||
+      lowerCaseMessage.includes("what are the risks");
+    
+    // If it's an educational question, skip the pool recommendation logic
+    if (isEducationalPoolQuestion) {
+      // Process as a regular message
+      const messageHistory = [
+        ...messages,
+        {
+          role: "user",
+          content: userMessage,
+          timestamp: new Date(),
+        },
+      ];
 
-      // ------------------------------------------------------------
-      // Check if message is about finding pools/recommendations
-      const lowerCaseMessage = userMessage.toLowerCase();
-      
-      // Enhanced query detection pattern to recognize various pool/yield questions
-      if (
-        // Pool finding patterns
-        lowerCaseMessage.includes("find") && (lowerCaseMessage.includes("pool") || lowerCaseMessage.includes("liquidity")) ||
-        lowerCaseMessage.includes("show") && (lowerCaseMessage.includes("pool") || lowerCaseMessage.includes("liquidity")) ||
-        lowerCaseMessage.includes("recommend") || 
-        lowerCaseMessage.includes("best pool") ||
-        lowerCaseMessage.includes("highest yield") ||
-        lowerCaseMessage.includes("best yield") ||
-        lowerCaseMessage.includes("best liquidity") ||
-        lowerCaseMessage.includes("high tvl") ||
-        
-        // Questions about what to invest in
-        lowerCaseMessage.includes("invest") && lowerCaseMessage.includes("where") ||
-        lowerCaseMessage.includes("what") && lowerCaseMessage.includes("pool") ||
-        
-        // Direct pool requests
-        lowerCaseMessage.includes("btc pool") ||
-        lowerCaseMessage.includes("bitcoin pool") ||
-        
-        // LP terminology
-        lowerCaseMessage.includes("lp ") ||
-        lowerCaseMessage.includes("liquidity pool") ||
-        lowerCaseMessage.includes("liquidity provision")
-      ) {
-        console.log("Detected pool query:", lowerCaseMessage);
-        await showBestYieldPool(selectedPortfolioStyle || 'conservative');
-      } else {
-
-        // ------------------------------------------------------------
-        // If this is a quick action or regular chat message - skip DLMM parsing
-        // Only parse as DLMM command if it's from the text input (not from quick actions)
-        let isDlmmCommand = false;
-        let commandResult;
-
-        if (!message) {
-          // Only check for DLMM command if not a quick action
-          commandResult = await parseDlmmCommand({
-            command: userMessage,
-            userPublicKey: publicKey || undefined,
-            service: {
-              dlmm: dlmmService,
-              position: positionService,
-            },
-          });
-
-          // If the command was processed successfully
-          if (
-            commandResult.type !== CommandType.UNKNOWN ||
-            commandResult.message
-          ) {
-            isDlmmCommand = true;
-            addMessage(
-              "assistant",
-              commandResult.message ||
-                "I'm not sure how to process that DLMM command."
-            );
-          }
-        }
-
-        // If not a DLMM command or it's a quick action, process as a regular message
-        if (!isDlmmCommand || message) {
-          const messageHistory = [
-            ...messages,
-            {
-              role: "user",
-              content: userMessage,
-              timestamp: new Date(),
-            },
-          ];
-
-          // Send to API
-          const response = await fetchMessage(messageHistory);
-          addMessage("assistant", response);
-        }
-        // ------------------------------------------------------------
-      }
-      // ------------------------------------------------------------
-    } catch (error) {
-      console.error("Error sending message:", error);
-      addErrorMessage(error);
-    } finally {
-      setIsLoading(false);
+      // Send to API
+      const response = await fetchMessage(messageHistory);
+      addMessage("assistant", response);
     }
-  };
+    // Otherwise, check if it's a pool discovery request
+    else if (
+      // More specific pool finding patterns
+      (lowerCaseMessage.includes("find") || lowerCaseMessage.includes("show") || lowerCaseMessage.includes("get")) && 
+        (lowerCaseMessage.includes("pool") || lowerCaseMessage.includes("liquidity")) ||
+      lowerCaseMessage.includes("recommend") || 
+      lowerCaseMessage.match(/best\s+pool/i) ||
+      lowerCaseMessage.match(/highest\s+yield/i) ||
+      lowerCaseMessage.match(/best\s+yield/i) ||
+      lowerCaseMessage.match(/best\s+liquidity/i) ||
+      lowerCaseMessage.match(/high\s+tvl/i) ||
+      
+      // Questions specifically about what to invest in
+      (lowerCaseMessage.includes("invest") && lowerCaseMessage.includes("where")) ||
+      (lowerCaseMessage.includes("which") && lowerCaseMessage.includes("pool")) ||
+      
+      // Direct pool requests
+      lowerCaseMessage.match(/btc\s+pool/i) ||
+      lowerCaseMessage.match(/bitcoin\s+pool/i) ||
+      
+      // Clear requests for LP opportunities
+      lowerCaseMessage.match(/lp\s+opportunities/i) ||
+      lowerCaseMessage.match(/liquidity\s+provision\s+options/i)
+    ) {
+      console.log("Detected pool query:", lowerCaseMessage);
+      await showBestYieldPool(selectedPortfolioStyle || 'conservative');
+    } else {
+      // Process as a regular message
+      const messageHistory = [
+        ...messages,
+        {
+          role: "user",
+          content: userMessage,
+          timestamp: new Date(),
+        },
+      ];
+
+      // Send to API
+      const response = await fetchMessage(messageHistory);
+      addMessage("assistant", response);
+    }
+  } catch (error) {
+    console.error("Error sending message:", error);
+    addErrorMessage(error);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleAddLiquidity = (pool: Pool) => {
     setSelectedPool(pool);
@@ -209,20 +194,17 @@ const ChatBox: React.FC = () => {
   const handleSelectPortfolioStyle = (style: string) => {
     setSelectedPortfolioStyle(style);
     
-    // Only add a message if we're not in the welcome screen
     if (!showWelcomeScreen) {
+      // Not first-time selection
       addMessage(
         "assistant",
         `You've selected the ${
           style.charAt(0).toUpperCase() + style.slice(1)
         } portfolio style. I'll recommend pools that match your risk preference.`
       );
-      // Show recommended pools based on portfolio style
-      showBestYieldPool(style);
     } else {
-      // If we're on the welcome screen, hide it after selecting a portfolio style
+      // First-time selection from welcome screen
       setShowWelcomeScreen(false);
-      // Add the initial message after choosing a style from the welcome screen
       addMessage(
         "assistant",
         `Welcome! You've selected the ${
@@ -230,6 +212,9 @@ const ChatBox: React.FC = () => {
         } portfolio style. I'll recommend pools that match your risk preference. How can I help you today?`
       );
     }
+    
+    // Always show pool recommendations, regardless of whether we're coming from welcome screen
+    showBestYieldPool(style);
   };
   
   // ------------------------------------------------------------
