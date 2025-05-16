@@ -1,7 +1,6 @@
 "use client";
 
 import { useBalanceContext } from "@/hooks/useBalanceContext";
-import { Card, CardContent } from "@/components/ui/card";
 import Image from "next/image";
 import { BalanceProvider } from "@/context/BalanceProvider";
 import { TokenPrices } from "@/lib/types";
@@ -11,12 +10,9 @@ import { Button } from "@/components/ui/button";
 import { RefreshCcw } from "lucide-react";
 import { useState, useEffect } from "react";
 import { 
-  LineChart, 
-  Line, 
   XAxis, 
   YAxis, 
   ResponsiveContainer, 
-  ReferenceLine,
   Area,
   AreaChart,
   Tooltip

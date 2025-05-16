@@ -39,7 +39,7 @@ const DlmmPools = () => {
 
   useEffect(() => {
     fetchPools();
-  }, []);
+  }, [fetchPools]); // Add fetchPools here
 
   return (
     <Card className="relative overflow-hidden">

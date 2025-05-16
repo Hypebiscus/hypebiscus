@@ -4,20 +4,15 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { SendHorizontal, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import BtcPoolsList from "./BtcPoolsList";
 import AddLiquidityModal from "./AddLiquidityModal";
 import QuickActionButtons from "./QuickActionButtons";
 import PortfolioStyleModal from "./PortfolioStyleModal";
 import { fetchMessage } from "@/lib/api/chat";
 import { fetchPools } from "@/lib/api/pools";
-import { formatPoolData } from "@/lib/api/formatters";
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
-import {
-  parseDlmmCommand,
-  CommandType,
-} from "@/lib/meteora/meteoraChatCommands";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Clock, Plus, Wallet, ChartLine, ArrowUp } from "@phosphor-icons/react";
 
@@ -66,9 +61,6 @@ const ChatBox: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // DLMM Service
-  const { service: dlmmService, publicKey } = useMeteoraDlmmService();
-  const { service: positionService } = useMeteoraPositionService();
-  const { connected } = useWallet();
 
   // Methods
   const addMessage = (role: MessageRole, content: string) => {
@@ -479,8 +471,7 @@ const ChatBox: React.FC = () => {
                 <ChartLine className="text-primary" size={20} />
               </div>
               <p className="text-white text-left">
-                Live pool analytics, including TVL, APR, and recent liquidity
-                changes.
+                Live pool analytics, including TVL, APR, and recent liquidity changes.
               </p>
             </div>
             <div className="flex items-center gap-2">

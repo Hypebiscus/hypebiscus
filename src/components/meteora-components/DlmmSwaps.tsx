@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowDown, Info } from "lucide-react";
 import { useMeteoraDlmmService, DlmmPoolInfo, SwapQuote } from "@/lib/meteora/meteoraDlmmService";
-import { BN } from '@coral-xyz/anchor';
+import { BN } from 'bn.js';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 const DlmmSwap = () => {

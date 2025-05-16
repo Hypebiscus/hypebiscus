@@ -4,12 +4,10 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, PlusCircle, MinusCircle, DollarSign, X } from "lucide-react";
+import { Loader2, DollarSign, X } from "lucide-react";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
-import { BN } from 'bn.js';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { PublicKey } from '@solana/web3.js';
 
 // A proper positions component focused on user's positions
 const DlmmPositions = () => {
@@ -17,7 +15,20 @@ const DlmmPositions = () => {
   const { service: positionService, publicKey, sendTransaction } = useMeteoraPositionService();
   const { connected } = useWallet();
   
-  const [positions, setPositions] = useState<any[]>([]);
+  interface Position {
+  pubkey: string;
+  poolName?: string;
+  poolAddress?: string;
+  liquidityPerBin: {
+    binId: number;
+    xAmount: string;
+    yAmount: string;
+    liquidityAmount: string;
+  }[];
+  totalValue?: number;
+}
+
+  const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);

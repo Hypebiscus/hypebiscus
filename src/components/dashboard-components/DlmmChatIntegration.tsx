@@ -6,7 +6,6 @@ import { useMeteoraPositionService } from '@/lib/meteora/meteoraPositionService'
 import { parseDlmmCommand, CommandType, CommandResult } from '@/lib/meteora/meteoraChatCommands';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { BN } from 'bn.js';
-import { StrategyType } from '@meteora-ag/dlmm';
 
 // Interface for message handlers
 interface MessageHandlers {

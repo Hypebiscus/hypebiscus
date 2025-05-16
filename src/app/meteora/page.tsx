@@ -11,7 +11,7 @@ export default function Meteora() {
       <div className="flex flex-col space-y-6">
         <h2 className="text-xl font-semibold">Meteora DLMM Integration</h2>
         <p className="text-sub-text">
-          Access Meteora's Dynamic Liquidity Market Maker (DLMM) pools to swap tokens with optimized pricing and reduced slippage.
+          Access Meteora&apos;s Dynamic Liquidity Market Maker (DLMM) pools to swap tokens with optimized pricing and reduced slippage.
         </p>
         
         {/* Main Content Area */}
