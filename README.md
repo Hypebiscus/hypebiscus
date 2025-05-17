@@ -1,3 +1,5 @@
+![Hypebiscus](https://drive.google.com/file/d/1_8Mp05ZsqOdlgohyGXPq1gdzDnieKIba/view?usp=sharing)
+
 ## Welcome to Hypebiscus.
 
 Our platform combines the power of AI and blockchain to help you make smarter DeFi decisions. With our AI chatbox, you can easily find the best liquidity pools (LPs) for your BTC, tailored to your risk profile and portfolio style. If you hold Bitcoin, you can bridge it to Solana using Zeus Bridge and receive zBTC, a token pegged 1:1 to BTC, unlocking new earning opportunities.
