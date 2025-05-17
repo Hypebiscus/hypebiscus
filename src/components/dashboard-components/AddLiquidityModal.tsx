@@ -66,51 +66,61 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
   
   const handleAddLiquidity = async () => {
-    if (!pool || !publicKey || !amount || parseFloat(amount) <= 0) return;
+  if (!pool || !publicKey || !amount || parseFloat(amount) <= 0) return;
+  
+  setIsLoading(true);
+  
+  try {
+    // Get active bin information
+    const activeBin = await dlmmService.getActiveBin(pool.address);
     
-    setIsLoading(true);
+    // Set bin range based on user input
+    const rangeWidthNum = parseInt(rangeWidth);
+    const minBinId = activeBin.binId - rangeWidthNum;
+    const maxBinId = activeBin.binId + rangeWidthNum;
     
-    try {
-      // Get active bin information
-      const activeBin = await dlmmService.getActiveBin(pool.address);
-      
-      // Set bin range based on user input
-      const rangeWidthNum = parseInt(rangeWidth);
-      const minBinId = activeBin.binId - rangeWidthNum;
-      const maxBinId = activeBin.binId + rangeWidthNum;
-      
-      // Convert amount to lamports/smallest unit (example: assumes 9 decimals)
-      const decimals = 9; // This should be fetched from the token metadata
-      const bnAmount = new BN(parseFloat(amount) * Math.pow(10, decimals));
-      
-      // Create new position with the specified strategy
-      const { transaction, positionKeypair } = await positionService.createBalancedPosition({
-        poolAddress: pool.address,
-        userPublicKey: publicKey,
-        totalXAmount: bnAmount,
-        totalYAmount: new BN(0), // Let the strategy calculate Y amount
-        minBinId,
-        maxBinId,
-        strategyType: getStrategyType()
-      });
-      
-      // Send transaction
+    // Convert amount to lamports/smallest unit (example: assumes 9 decimals)
+    const decimals = 9; // This should be fetched from the token metadata
+    const bnAmount = new BN(parseFloat(amount) * Math.pow(10, decimals));
+    
+    // Create new position with the specified strategy
+    const { transaction, positionKeypair } = await positionService.createBalancedPosition({
+      poolAddress: pool.address,
+      userPublicKey: publicKey,
+      totalXAmount: bnAmount,
+      totalYAmount: new BN(0), // Let the strategy calculate Y amount
+      minBinId,
+      maxBinId,
+      strategyType: getStrategyType()
+    });
+    
+    // Send transaction - with the fix applied
+    if (Array.isArray(transaction)) {
+      // Process each transaction in sequence
+      for (const tx of transaction) {
+        await sendTransaction(tx, dlmmService.connection, {
+          signers: [positionKeypair]
+        });
+      }
+    } else {
+      // Process single transaction
       await sendTransaction(transaction, dlmmService.connection, {
         signers: [positionKeypair]
       });
-      
-      // Show success message or toast
-      alert('Liquidity added successfully!');
-      
-      // Close modal
-      onClose();
-    } catch (error) {
-      console.error('Error adding liquidity:', error);
-      alert(`Error adding liquidity: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsLoading(false);
     }
-  };
+    
+    // Show success message or toast
+    alert('Liquidity added successfully!');
+    
+    // Close modal
+    onClose();
+  } catch (error) {
+    console.error('Error adding liquidity:', error);
+    alert(`Error adding liquidity: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  } finally {
+    setIsLoading(false);
+  }
+};
   
   return (
     <Dialog open={isOpen && !!pool} onOpenChange={onClose}>
