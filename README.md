@@ -18,3 +18,5 @@ Interact with our AI chatbox to discover the best liquidity pools (LPs) that mat
 Seamlessly bridge your BTC to Solana using Zeus Bridge, integrated through Hypebiscus, to receive zBTC (pegged 1:1 to BTC).
 4. One-Click LP Deployment
 With a single click, deploy your zBTC into the ideal liquidity pool recommended by the AI-no manual steps required.
+
+Gitbook: [https://hypebiscuss-organization.gitbook.io/hypebiscus](https://hypebiscuss-organization.gitbook.io/hypebiscus)
