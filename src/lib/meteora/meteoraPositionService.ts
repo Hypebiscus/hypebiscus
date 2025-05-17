@@ -1,8 +1,13 @@
 // src/lib/meteora/meteoraPositionService.ts
 import DLMM, { StrategyType } from '@meteora-ag/dlmm';
-import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, Transaction} from '@solana/web3.js';
+// import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
+
+// Define type alias for the DLMM instance
+// This matches the type definition in meteoraDlmmService.ts for consistency
+export type DlmmType = DLMM;
 
 // Interface for position creation parameters
 export interface CreatePositionParams {
@@ -27,7 +32,7 @@ export interface PositionManagementParams {
  */
 export class MeteoraPositionService {
   private connection: Connection;
-  private poolInstances: Map<string, any> = new Map();
+  private poolInstances: Map<string, DlmmType> = new Map();
 
   constructor(connection: Connection) {
     this.connection = connection;
@@ -38,10 +43,10 @@ export class MeteoraPositionService {
    * @param poolAddress Address of the DLMM pool
    * @returns Instance of the DLMM pool
    */
-  async initializePool(poolAddress: string): Promise<any> {
+  async initializePool(poolAddress: string): Promise<DlmmType> {
     try {
       if (this.poolInstances.has(poolAddress)) {
-        return this.poolInstances.get(poolAddress);
+        return this.poolInstances.get(poolAddress)!;
       }
 
       const pubkey = new PublicKey(poolAddress);
@@ -67,7 +72,11 @@ export class MeteoraPositionService {
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
 
-      const createPositionTx = await pool.initializePositionAndAddLiquidityByStrategy({
+      // Type assertion needed for compatibility with external library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedPool = pool as any;
+
+      const createPositionTx = await typedPool.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: newPosition.publicKey,
         user: params.userPublicKey,
         totalXAmount: params.totalXAmount,
@@ -110,7 +119,11 @@ export class MeteoraPositionService {
       const totalXAmount = useTokenX ? params.totalXAmount : new BN(0);
       const totalYAmount = useTokenX ? new BN(0) : params.totalYAmount;
 
-      const createPositionTx = await pool.initializePositionAndAddLiquidityByStrategy({
+      // Type assertion needed for compatibility with external library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedPool = pool as any;
+
+      const createPositionTx = await typedPool.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: newPosition.publicKey,
         user: params.userPublicKey,
         totalXAmount,
@@ -155,7 +168,11 @@ export class MeteoraPositionService {
       
       const positionPubKey = new PublicKey(params.positionPubkey);
       
-      const addLiquidityTx = await pool.addLiquidityByStrategy({
+      // Type assertion needed for compatibility with external library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedPool = pool as any;
+      
+      const addLiquidityTx = await typedPool.addLiquidityByStrategy({
         positionPubKey,
         user: params.userPublicKey,
         totalXAmount,
@@ -195,8 +212,12 @@ export class MeteoraPositionService {
       
       const positionPubKey = new PublicKey(params.positionPubkey);
       
+      // Type assertion needed for compatibility with external library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedPool = pool as any;
+      
       // Update to use fromBinId and toBinId instead of binIds array
-      const removeLiquidityTx = await pool.removeLiquidity({
+      const removeLiquidityTx = await typedPool.removeLiquidity({
         position: positionPubKey,
         user: params.userPublicKey,
         fromBinId,
@@ -223,7 +244,11 @@ export class MeteoraPositionService {
       
       const positionPubKey = new PublicKey(params.positionPubkey);
       
-      const claimFeeTx = await pool.claimSwapFee({
+      // Type assertion needed for compatibility with external library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedPool = pool as any;
+      
+      const claimFeeTx = await typedPool.claimSwapFee({
         owner: params.userPublicKey,
         position: positionPubKey,
       });
@@ -246,7 +271,11 @@ export class MeteoraPositionService {
       
       const positionPubKey = new PublicKey(params.positionPubkey);
       
-      const closePositionTx = await pool.closePosition({
+      // Type assertion needed for compatibility with external library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const typedPool = pool as any;
+      
+      const closePositionTx = await typedPool.closePosition({
         owner: params.userPublicKey,
         position: positionPubKey,
       });

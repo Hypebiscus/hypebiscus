@@ -1,7 +1,7 @@
 // src/components/meteora-components/DlmmPositions.tsx
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, DollarSign, X } from "lucide-react";
@@ -16,45 +16,26 @@ const DlmmPositions = () => {
   const { connected } = useWallet();
   
   interface Position {
-  pubkey: string;
-  poolName?: string;
-  poolAddress?: string;
-  liquidityPerBin: {
-    binId: number;
-    xAmount: string;
-    yAmount: string;
-    liquidityAmount: string;
-  }[];
-  totalValue?: number;
-}
+    pubkey: string;
+    poolName?: string;
+    poolAddress?: string;
+    liquidityPerBin: {
+      binId: number;
+      xAmount: string;
+      yAmount: string;
+      liquidityAmount: string;
+    }[];
+    totalValue?: number;
+  }
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
+  // Keeping these state variables for future implementation of position details view
+  // const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Fetch user positions
-  useEffect(() => {
-    if (!connected || !publicKey) return;
-    
-    const fetchPositions = async () => {
-      setLoading(true);
-      try {
-        // This needs to be implemented to get all user positions across pools
-        const userPositions = await fetchUserPositions();
-        setPositions(userPositions);
-      } catch (error) {
-        console.error("Error fetching positions:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchPositions();
-  }, [connected, publicKey]);
-  
   // Example function to fetch all user positions - implementation depends on your SDK
-  const fetchUserPositions = async () => {
+  const fetchUserPositions = useCallback(async () => {
     // You would need to implement this based on your API and data model
     // This is a placeholder - you'd need to adjust based on your actual data structure
     const allPositions = [];
@@ -74,7 +55,27 @@ const DlmmPositions = () => {
     }
     
     return allPositions;
-  };
+  }, [dlmmService, publicKey]);
+
+  // Fetch user positions
+  useEffect(() => {
+    if (!connected || !publicKey) return;
+    
+    const fetchPositions = async () => {
+      setLoading(true);
+      try {
+        // This needs to be implemented to get all user positions across pools
+        const userPositions = await fetchUserPositions();
+        setPositions(userPositions);
+      } catch (error) {
+        console.error("Error fetching positions:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchPositions();
+  }, [connected, publicKey, fetchUserPositions]);
   
   // Handle claim fees
   const handleClaimFees = async (positionPubkey: string) => {
@@ -105,7 +106,10 @@ const DlmmPositions = () => {
     return position?.poolAddress || '';
   };
   
-  function handleClosePosition(pubkey: any): void {
+  // Function stub for closing a position (not implemented yet)
+  function handleClosePosition(pubkey: string): void {
+    // Parameter kept for future implementation
+    console.log(`Close position functionality not implemented yet for: ${pubkey}`);
     throw new Error('Function not implemented.');
   }
 

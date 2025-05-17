@@ -1,7 +1,7 @@
 // src/components/dashboard-components/ChatBox.tsx
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
@@ -11,9 +11,9 @@ import QuickActionButtons from "./QuickActionButtons";
 import PortfolioStyleModal from "./PortfolioStyleModal";
 import { fetchMessage } from "@/lib/api/chat";
 import { fetchPools } from "@/lib/api/pools";
-import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
-import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
-import { useWallet } from "@solana/wallet-adapter-react";
+// import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
+// import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";e
+// import { useWallet } from "@solana/wallet-adapter-react";
 import { Clock, Plus, Wallet, ChartLine, ArrowUp } from "@phosphor-icons/react";
 
 // Type definitions
@@ -24,6 +24,26 @@ interface Message {
   content: string;
   timestamp: Date;
 }
+
+// API response types
+interface ApiPool {
+  name: string;
+  address: string;
+  liquidity: string;
+  current_price: string | number;
+  apy: number;
+  fees_24h: number;
+  trade_volume_24h: number;
+  [key: string]: unknown; // Using 'unknown' instead of 'any' for better type safety
+}
+
+// Define Group type to match what the API response actually contains
+interface Group {
+  name: string;
+  pairs: ApiPool[];
+  [key: string]: unknown;
+}
+
 
 interface Pool {
   name: string;
@@ -62,23 +82,226 @@ const ChatBox: React.FC = () => {
 
   // DLMM Service
 
+  // Helper function to safely format currency values - must be defined before it's used
+  const formatCurrencyValue = useCallback((value: string | number | undefined, decimals: number = 0): string => {
+    if (typeof value === "string") {
+      const num = parseFloat(value);
+      if (!isNaN(num)) {
+        return num.toLocaleString(undefined, {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        });
+      }
+      return value;
+    } else if (typeof value === "number") {
+      return value.toLocaleString(undefined, {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      });
+    }
+    return "0";
+  }, []);
+
   // Methods
-  const addMessage = (role: MessageRole, content: string) => {
+  const addMessage = useCallback((role: MessageRole, content: string) => {
     setMessages((prev) => [...prev, { role, content, timestamp: new Date() }]);
     // Hide welcome screen when conversation starts
     if (showWelcomeScreen) {
       setShowWelcomeScreen(false);
     }
-  };
+  }, [showWelcomeScreen]);
 
-  const addErrorMessage = (error: unknown) => {
+  const addErrorMessage = useCallback((error: unknown) => {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
 
     addMessage("assistant", `Sorry, there was an error: ${errorMessage}`);
-  };
+  }, [addMessage]);
+  
+  // Function to fetch and display the best yield pool - must be defined before handleSendMessage
+  const showBestYieldPool = useCallback(async (style: string) => {
+    setIsPoolLoading(true);
+    
+    try {
+      // Display a loading message - this will remain visible
+      addMessage(
+        "assistant",
+        `Finding the best ${style} Solana liquidity pools for you...`
+      );
+      
+      // Add a deliberate delay to show loading state (1.5 seconds)
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Use different search terms based on portfolio style
+      const searchTerms = style === 'conservative' 
+        ? ['wbtc-sol']                      // Conservative: only wBTC-SOL
+        : style === 'moderate' 
+          ? ['wbtc-sol', 'zbtc-sol']        // Moderate: both pairs for diversification
+          : ['zbtc-sol'];                   // Aggressive: only zBTC-SOL
+          
+      let allPools: ApiPool[] = [];
+      
+      // Fetch pools for each search term
+      for (const term of searchTerms) {
+        try {
+          console.log(`Fetching pools with search term: ${term}`);
+          const poolsData = await fetchPools(term);
+          
+          if (poolsData && poolsData.groups && poolsData.groups.length > 0) {
+            // Use type assertion to ensure compatibility with the Group type
+            (poolsData.groups as Group[]).forEach((group) => {
+              if (group.pairs && group.pairs.length > 0) {
+                allPools = [...allPools, ...group.pairs];
+              }
+            });
+          }
+        } catch (error) {
+          console.error(`Error fetching pools for ${term}:`, error);
+          // Continue with next term
+        }
+      }
+      
+      if (allPools.length > 0) {
+        // Sort pools based on portfolio style
+        if (style === 'conservative') {
+          // Sort by TVL (liquidity) for conservative
+          allPools.sort((a, b) => parseFloat(b.liquidity) - parseFloat(a.liquidity));
+        } else if (style === 'moderate') {
+          // Sort by balance of TVL and APY for moderate
+          allPools.sort((a, b) => {
+            const scoreA = (parseFloat(a.liquidity) * 0.5) + (a.apy * 0.5);
+            const scoreB = (parseFloat(b.liquidity) * 0.5) + (b.apy * 0.5);
+            return scoreB - scoreA;
+          });
+        } else {
+          // Sort by APY for aggressive
+          allPools.sort((a, b) => b.apy - a.apy);
+        }
+        
+        // Take the top pool, but avoid showing the same one again
+        let selectedPool = allPools[0];
+        let poolIndex = 0;
+        
+        // Check if we already have this pool displayed and try to find a different one
+        const existingPoolAddresses = currentPools.map(p => p.address);
+        while (existingPoolAddresses.includes(selectedPool.address) && poolIndex < allPools.length - 1) {
+          poolIndex++;
+          selectedPool = allPools[poolIndex];
+        }
+        
+        // If we found a pool (either new or all are duplicates)
+        if (selectedPool) {
+          // Calculate fee APY safely
+          const fees24h = typeof selectedPool.fees_24h === 'number' ? selectedPool.fees_24h : 0;
+          const liquidityValue = parseFloat(selectedPool.liquidity);
+          const feeAPY = (fees24h / liquidityValue) * 100;
+          
+          // Create formatted pool
+          const formattedPool = {
+            name: selectedPool.name,
+            address: selectedPool.address,
+            liquidity: formatCurrencyValue(selectedPool.liquidity, 0),
+            currentPrice: formatCurrencyValue(selectedPool.current_price, 2),
+            // Calculate APY based on 24h fees to TVL ratio instead of using the API's apy field
+            // This matches what Meteora displays as "24hr fee / TVL"
+            apy: feeAPY.toFixed(2) + "%",
+            fees24h: formatCurrencyValue(fees24h, 2),
+            volume24h: formatCurrencyValue(selectedPool.trade_volume_24h, 0),
+            // Enhanced data for display
+            estimatedDailyEarnings: ((fees24h / liquidityValue) * 10000).toFixed(2),
+            investmentAmount: "10,000",
+            riskLevel: style,
+            reasons: [
+              // Style-specific first reason
+              style === 'conservative' 
+                ? `Deep liquidity — $${formatCurrencyValue(selectedPool.liquidity, 0)} locked in this pool minimizes slippage and provides capital stability.`
+                : style === 'moderate'
+                  ? `Balanced metrics — $${formatCurrencyValue(selectedPool.liquidity, 0)} TVL coupled with ${feeAPY.toFixed(2)}% returns offers the ideal middle ground.`
+                  : `Revenue maximizer — ${feeAPY.toFixed(2)}% annualized yield outperforms most alternatives in the ecosystem.`,
+              
+              // Volume-based reason
+              `Active trading — $${formatCurrencyValue(selectedPool.trade_volume_24h, 0)} daily volume indicates strong market participation and ease of exit.`,
+              
+              // Fee-based reason  
+              `Consistent revenue — $${formatCurrencyValue(fees24h, 2)} collected in fees yesterday demonstrates real earning potential.`,
+              
+              // Trading activity reason
+              parseFloat(String(selectedPool.trade_volume_24h)) > 1000000
+                ? "High demand trading pair — market participants heavily favor this asset combination."
+                : "Sustainable activity — trading frequency supports reliable returns without excessive volatility.",
+                
+              // Final recommendation reason
+              style === 'conservative' 
+                ? "Capital preservation focus — lower volatility profile aligns with your safety-first approach."
+                : style === 'moderate'
+                  ? "Growth with guardrails — this pool balances upside potential with downside protection."
+                  : "Opportunistic positioning — designed for investors seeking maximum capital appreciation."
+            ],
+            risks: [
+              // Market related risk
+              "Market dynamics vary — future performance may differ from historical data as trading conditions evolve.",
+              
+              // Impermanent loss risk with different wording
+              style === 'conservative'
+                ? "Price divergence impact — if token values change significantly relative to each other, returns may be affected by impermanent loss."
+                : style === 'moderate'
+                  ? "Asset correlation factor — substantial price differences between paired assets can impact expected returns."
+                  : "Volatility tradeoff — higher returns come with increased exposure to impermanent loss during market swings.",
+              
+              // Protocol/technical risk
+              "Protocol considerations — while thoroughly audited, all DeFi interactions carry inherent smart contract risk.",
+              
+              // Style-specific risk
+              style === 'conservative'
+                ? "Opportunity cost — selecting safety means potentially lower returns than more aggressive options."
+                : style === 'moderate'
+                  ? "Partial downside protection — moderate strategy provides some but not complete insulation from market downturns."
+                  : "Amplified movements — this pool may experience larger price fluctuations during market volatility."
+            ]
+          };
+          
+          // Show success message
+          addMessage(
+            "assistant",
+            `Found the optimal ${style} Solana Liquidity Pool for your portfolio.`
+          );
+          
+          // Keep existing pools and add the new one
+          // Use a different approach to persist pools across renders
+          if (existingPoolAddresses.includes(formattedPool.address)) {
+            // If we already have this pool, don't add it again
+            // but we keep the setCurrentPools call to trigger a re-render
+            setCurrentPools([...currentPools]);
+          } else {
+            // Add the new pool to existing ones
+            setCurrentPools([...currentPools, formattedPool]);
+          }
+        } else {
+          // No pools found after filtering
+          addMessage(
+            "assistant",
+            `I searched but couldn't find any suitable pools matching your ${style} portfolio style. Please try again later or adjust your preferences.`
+          );
+        }
+      } else {
+        // No pools found at all
+        addMessage(
+          "assistant",
+          `Sorry, I couldn't find any Bitcoin liquidity pools on Solana at the moment. Please try again later.`
+        );
+      }
+    } catch (error) {
+      console.error("Error in showBestYieldPool:", error);
+      addMessage(
+        "assistant",
+        `Sorry, there was an error finding pools: ${error instanceof Error ? error.message : "Unknown error"}. Please try again later.`
+      );
+    } finally {
+      setIsPoolLoading(false);
+    }
+  }, [currentPools, addMessage, formatCurrencyValue]);
 
-  const handleSendMessage = async (message?: string) => {
+  const handleSendMessage = useCallback(async (message?: string) => {
   const messageToSend = message || inputMessage;
   if (!messageToSend.trim()) return;
 
@@ -163,7 +386,7 @@ const ChatBox: React.FC = () => {
   } finally {
     setIsLoading(false);
   }
-};
+  }, [inputMessage, messages, selectedPortfolioStyle, addMessage, addErrorMessage, showBestYieldPool]);
 
   const handleAddLiquidity = (pool: Pool) => {
     setSelectedPool(pool);
@@ -211,225 +434,28 @@ const ChatBox: React.FC = () => {
   
   // ------------------------------------------------------------
 
-  // Function to fetch and display the best yield pool
-  const showBestYieldPool = async (style: string) => {
-    setIsPoolLoading(true);
-    
-    try {
-      // Display a loading message - this will remain visible
-      addMessage(
-        "assistant",
-        `Finding the best ${style} Solana liquidity pools for you...`
-      );
-      
-      // Add a deliberate delay to show loading state (1.5 seconds)
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Use different search terms based on portfolio style
-      const searchTerms = style === 'conservative' 
-        ? ['wbtc-sol']                      // Conservative: only wBTC-SOL
-        : style === 'moderate' 
-          ? ['wbtc-sol', 'zbtc-sol']        // Moderate: both pairs for diversification
-          : ['zbtc-sol'];                   // Aggressive: only zBTC-SOL
-          
-      let allPools: any[] = [];
-      
-      // Fetch pools for each search term
-      for (const term of searchTerms) {
-        try {
-          console.log(`Fetching pools with search term: ${term}`);
-          const poolsData = await fetchPools(term);
-          
-          if (poolsData && poolsData.groups && poolsData.groups.length > 0) {
-            poolsData.groups.forEach((group: any) => {
-              if (group.pairs && group.pairs.length > 0) {
-                allPools = [...allPools, ...group.pairs];
-              }
-            });
-          }
-        } catch (error) {
-          console.error(`Error fetching pools for ${term}:`, error);
-          // Continue with next term
-        }
-      }
-      
-      if (allPools.length > 0) {
-        // Sort pools based on portfolio style
-        if (style === 'conservative') {
-          // Sort by TVL (liquidity) for conservative
-          allPools.sort((a, b) => parseFloat(b.liquidity) - parseFloat(a.liquidity));
-        } else if (style === 'moderate') {
-          // Sort by balance of TVL and APY for moderate
-          allPools.sort((a, b) => {
-            const scoreA = (parseFloat(a.liquidity) * 0.5) + (a.apy * 0.5);
-            const scoreB = (parseFloat(b.liquidity) * 0.5) + (b.apy * 0.5);
-            return scoreB - scoreA;
-          });
-        } else {
-          // Sort by APY for aggressive
-          allPools.sort((a, b) => b.apy - a.apy);
-        }
-        
-        // Take the top pool, but avoid showing the same one again
-        let selectedPool = allPools[0];
-        let poolIndex = 0;
-        
-        // Check if we already have this pool displayed and try to find a different one
-        const existingPoolAddresses = currentPools.map(p => p.address);
-        while (existingPoolAddresses.includes(selectedPool.address) && poolIndex < allPools.length - 1) {
-          poolIndex++;
-          selectedPool = allPools[poolIndex];
-        }
-        
-        // If we found a pool (either new or all are duplicates)
-        if (selectedPool) {
-          // Create formatted pool
-          const formattedPool = {
-            name: selectedPool.name,
-            address: selectedPool.address,
-            liquidity: formatCurrencyValue(selectedPool.liquidity, 0),
-            currentPrice: formatCurrencyValue(selectedPool.current_price, 2),
-            // Calculate APY based on 24h fees to TVL ratio instead of using the API's apy field
-            // This matches what Meteora displays as "24hr fee / TVL"
-            apy: ((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 100).toFixed(2) + "%",
-            fees24h: formatCurrencyValue(selectedPool.fees_24h, 2),
-            volume24h: formatCurrencyValue(selectedPool.trade_volume_24h, 0),
-            // Enhanced data for display
-            estimatedDailyEarnings: ((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 10000).toFixed(2),
-            investmentAmount: "10,000",
-            riskLevel: style,
-            reasons: [
-              // Style-specific first reason
-              style === 'conservative' 
-                ? `Deep liquidity — $${formatCurrencyValue(selectedPool.liquidity, 0)} locked in this pool minimizes slippage and provides capital stability.`
-                : style === 'moderate'
-                  ? `Balanced metrics — $${formatCurrencyValue(selectedPool.liquidity, 0)} TVL coupled with ${((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 100).toFixed(2)}% returns offers the ideal middle ground.`
-                  : `Revenue maximizer — ${((selectedPool.fees_24h / parseFloat(selectedPool.liquidity)) * 100).toFixed(2)}% annualized yield outperforms most alternatives in the ecosystem.`,
-              
-              // Volume-based reason
-              `Active trading — $${formatCurrencyValue(selectedPool.trade_volume_24h, 0)} daily volume indicates strong market participation and ease of exit.`,
-              
-              // Fee-based reason  
-              `Consistent revenue — $${formatCurrencyValue(selectedPool.fees_24h, 2)} collected in fees yesterday demonstrates real earning potential.`,
-              
-              // Trading activity reason
-              parseFloat(selectedPool.trade_volume_24h) > 1000000
-                ? "High demand trading pair — market participants heavily favor this asset combination."
-                : "Sustainable activity — trading frequency supports reliable returns without excessive volatility.",
-                
-              // Final recommendation reason
-              style === 'conservative' 
-                ? "Capital preservation focus — lower volatility profile aligns with your safety-first approach."
-                : style === 'moderate'
-                  ? "Growth with guardrails — this pool balances upside potential with downside protection."
-                  : "Opportunistic positioning — designed for investors seeking maximum capital appreciation."
-            ],
-            risks: [
-              // Market related risk
-              "Market dynamics vary — future performance may differ from historical data as trading conditions evolve.",
-              
-              // Impermanent loss risk with different wording
-              style === 'conservative'
-                ? "Price divergence impact — if token values change significantly relative to each other, returns may be affected by impermanent loss."
-                : style === 'moderate'
-                  ? "Asset correlation factor — substantial price differences between paired assets can impact expected returns."
-                  : "Volatility tradeoff — higher returns come with increased exposure to impermanent loss during market swings.",
-              
-              // Protocol/technical risk
-              "Protocol considerations — while thoroughly audited, all DeFi interactions carry inherent smart contract risk.",
-              
-              // Style-specific risk
-              style === 'conservative'
-                ? "Opportunity cost — selecting safety means potentially lower returns than more aggressive options."
-                : style === 'moderate'
-                  ? "Partial downside protection — moderate strategy provides some but not complete insulation from market downturns."
-                  : "Amplified movements — this pool may experience larger price fluctuations during market volatility."
-            ]
-          };
-          
-          // Show success message
-          addMessage(
-            "assistant",
-            `Found the optimal ${style} Solana Liquidity Pool for your portfolio.`
-          );
-          
-          // Keep existing pools and add the new one
-          // Use a different approach to persist pools across renders
-          if (existingPoolAddresses.includes(formattedPool.address)) {
-            // If we already have this pool, don't add it again
-            // but we keep the setCurrentPools call to trigger a re-render
-            setCurrentPools([...currentPools]);
-          } else {
-            // Add the new pool to existing ones
-            setCurrentPools([...currentPools, formattedPool]);
-          }
-        } else {
-          // No pools found after filtering
-          addMessage(
-            "assistant",
-            `I searched but couldn't find any suitable pools matching your ${style} portfolio style. Please try again later or adjust your preferences.`
-          );
-        }
-      } else {
-        // No pools found at all
-        addMessage(
-          "assistant",
-          `Sorry, I couldn't find any Bitcoin liquidity pools on Solana at the moment. Please try again later.`
-        );
-      }
-    } catch (error) {
-      console.error("Error in showBestYieldPool:", error);
-      addMessage(
-        "assistant",
-        `Sorry, there was an error finding pools: ${error instanceof Error ? error.message : "Unknown error"}. Please try again later.`
-      );
-    } finally {
-      setIsPoolLoading(false);
-    }
-  };
-
-  // ------------------------------------------------------------
-
-  // Format time for display
+  // Format time for display - kept for potential future use but marked with a comment instead of ts-expect-error
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
-
-  // Helper function to safely format currency values
-  const formatCurrencyValue = (value: any, decimals: number = 0): string => {
-    if (typeof value === "string") {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        return num.toLocaleString(undefined, {
-          minimumFractionDigits: decimals,
-          maximumFractionDigits: decimals,
-        });
-      }
-      return value;
-    } else if (typeof value === "number") {
-      return value.toLocaleString(undefined, {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      });
-    }
-    return "0";
-  };
+  // Note: formatTime is currently unused but will be used in future enhancements for message timestamps
 
   // Helper function to safely format percentage values
-  const formatPercentValue = (value: any): string => {
-    if (typeof value === "string") {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        // Format as percentage with 2 decimal places
-        return num.toFixed(2) + "%";
-      }
-      return value;
-    } else if (typeof value === "number") {
-      // Format as percentage with 2 decimal places
-      return value.toFixed(2) + "%";
-    }
-    return "0%";
-  };
+  // const formatPercentValue = (value: string | number | undefined): string => {
+  //   if (typeof value === "string") {
+  //     const num = parseFloat(value);
+  //     if (!isNaN(num)) {
+  //       // Format as percentage with 2 decimal places
+  //       return num.toFixed(2) + "%";
+  //     }
+  //     return value;
+  //   } else if (typeof value === "number") {
+  //     // Format as percentage with 2 decimal places
+  //     return value.toFixed(2) + "%";
+  //   }
+  //   return "0%";
+  // };
+  // Note: formatPercentValue is saved for future enhancements when percentage formatting is needed
 
   // Effects
   useEffect(() => {
@@ -463,7 +489,7 @@ const ChatBox: React.FC = () => {
                 <Plus className="text-primary" size={20} />
               </div>
               <p className="text-white text-left">
-                Instant 'Add Position' capability.
+                Instant &apos;Add Position&apos; capability.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -585,7 +611,7 @@ interface MessageBubbleProps {
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
-  formatTime,
+  // formatTime,
 }) => {
   const isUser = message.role === "user";
 

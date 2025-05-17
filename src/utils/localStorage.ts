@@ -36,8 +36,8 @@ export const getLocalStorage = <T>(key: string): T | null => {
     const item = window.localStorage.getItem(key);
     if (!item) return null;
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const storageItem: StorageItem<T> = JSON.parse(item);
+    // Using a type assertion since we know the structure of the stored data
+    const storageItem = JSON.parse(item) as StorageItem<T>;
 
     if (storageItem.expiry && storageItem.expiry < Date.now()) {
       removeLocalStorage(key);

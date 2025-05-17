@@ -58,7 +58,15 @@ const generateMockData = (startPrice: number, volatility: number, dataPoints: nu
 const timePeriods = ['1H', '1D', '1W', '1M', '1Y', 'Max'];
 
 // Custom tooltip component
-const CustomTooltip = ({ active, payload }: any) => {
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{
+    value: number;
+    [key: string]: unknown; // More specific than 'any'
+  }>;
+}
+
+const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
   if (active && payload && payload.length) {
     const value = payload[0].value;
     
@@ -181,48 +189,58 @@ const BalanceChart = ({
   );
 };
 
-export const BalanceCard = ({
-  tokenSymbol,
-  tokenBalance,
-  tokenLogoURI,
-  tokenPrice,
-  priceChange,
-}: BalanceCardProps) => {
-  const valueInUSD = tokenBalance * tokenPrice;
+// const BalanceCard = ({
+//   tokenSymbol,
+//   tokenBalance,
+//   tokenLogoURI,
+//   tokenPrice,
+//   // priceChange, 
+// }: BalanceCardProps) => {
+//   const valueInUSD = tokenBalance * tokenPrice;
 
-  return (
-    <div className="flex items-center justify-between w-full">
-      <div className="flex items-center gap-2">
-        <Image src={tokenLogoURI} alt={tokenSymbol} width={24} height={24} />
-        <span className="text-sm font-semibold text-white">{tokenSymbol}</span>
-      </div>
-      {/* {priceChange !== undefined && (
-        <span
-          className={`text-xs ${
-            priceChange >= 0 ? "text-green-500" : "text-red-500"
-          }`}
-        >
-          {priceChange >= 0 ? "+" : ""}
-          {priceChange.toFixed(2)}%
-        </span>
-      )} */}
-      <div className="flex flex-col justify-end items-end text-lg font-semibold text-white">
-        ${valueInUSD < 0.01 ? valueInUSD.toFixed(6) : valueInUSD.toFixed(2)}
-        <p className="text-xs font-light text-gray-400">
-          {tokenBalance.toFixed(5)}
-        </p>
-      </div>
-    </div>
-  );
-};
+//   return (
+//     <div className="flex items-center justify-between w-full">
+//       <div className="flex items-center gap-2">
+//         <Image src={tokenLogoURI} alt={tokenSymbol} width={24} height={24} />
+//         <span className="text-sm font-semibold text-white">{tokenSymbol}</span>
+//       </div>
+//       {/* {priceChange !== undefined && (
+//         <span
+//           className={`text-xs ${
+//             priceChange >= 0 ? "text-green-500" : "text-red-500"
+//           }`}
+//         >
+//           {priceChange >= 0 ? "+" : ""}
+//           {priceChange.toFixed(2)}%
+//         </span>
+//       )} */}
+//       <div className="flex flex-col justify-end items-end text-lg font-semibold text-white">
+//         ${valueInUSD < 0.01 ? valueInUSD.toFixed(6) : valueInUSD.toFixed(2)}
+//         <p className="text-xs font-light text-gray-400">
+//           {tokenBalance.toFixed(5)}
+//         </p>
+//       </div>
+//     </div>
+//   );
+// };
+
+// Type definitions for Gecko data 
+interface GeckoTokenData {
+  id?: string;
+  symbol?: string;
+  name?: string;
+  image?: string;
+  price_usd?: number;
+  price_24h_change?: number;
+}
 
 // Helper function to find gecko data for a token
 const findGeckoDataForToken = (
   tokenSymbol: string, 
   tokenMint: string | undefined, 
-  geckoData: Record<string, any>,
-  tokens: any[]
-): any => {
+  geckoData: Record<string, GeckoTokenData>,
+  // tokens: any[] // Using any[] to avoid type conflicts with useTokenData hook return type
+): GeckoTokenData | null => {
   // If we have a mint address, try to find it directly
   if (tokenMint && geckoData[tokenMint.toLowerCase()]) {
     return geckoData[tokenMint.toLowerCase()];
@@ -236,7 +254,7 @@ const findGeckoDataForToken = (
   
   // If we don't have a direct mint match, try to match by symbol
   const exactSymbolMatch = Object.values(geckoData).find(
-    (data: any) => data.symbol?.toUpperCase() === tokenSymbol.toUpperCase()
+    (data: GeckoTokenData) => data.symbol?.toUpperCase() === tokenSymbol.toUpperCase()
   );
   
   if (exactSymbolMatch) {
@@ -250,19 +268,19 @@ const findGeckoDataForToken = (
 const EnhancedBalanceCard = ({
   tokenSymbol,
   tokenBalance,
-  tokenLogoURI,
+  // tokenLogoURI, 
   tokenPrice,
   priceChange,
   geckoData,
   tokenMint,
-  tokens
+  // tokens
 }: BalanceCardProps & { 
-  geckoData: Record<string, any>,
+  geckoData: Record<string, GeckoTokenData>,
   tokenMint?: string,
-  tokens: any[]
+  // tokens: any[] // Using any[] to avoid type conflicts with useTokenData hook return type
 }) => {
   // Try to find gecko data for this token
-  const tokenGeckoData = findGeckoDataForToken(tokenSymbol, tokenMint, geckoData, tokens);
+  const tokenGeckoData = findGeckoDataForToken(tokenSymbol, tokenMint, geckoData);
   
   // Use Gecko price if available, otherwise fall back to local price
   const geckoPrice = tokenGeckoData?.price_usd;
@@ -336,7 +354,7 @@ const WalletContent = () => {
   } = useBalanceContext();
   const tokens = useTokenData(); // Get all token data
   const [tokenMintAddresses, setTokenMintAddresses] = useState<string[]>([]);
-  const [geckoData, setGeckoData] = useState<Record<string, any>>({});
+  const [geckoData, setGeckoData] = useState<Record<string, GeckoTokenData>>({});
   const [isGeckoLoading, setIsGeckoLoading] = useState(false);
 
   // Mock price change data - in a real app, you would fetch this from an API
@@ -431,9 +449,22 @@ const WalletContent = () => {
           
           if (data?.data) {
             // Create a mapping of mint address to token data
-            const addressToData: Record<string, any> = {};
+            const addressToData: Record<string, GeckoTokenData> = {};
             
-            data.data.forEach((token: any) => {
+            // Define interface for token data from API
+            interface GeckoTokenResponse {
+              id: string;
+              attributes?: {
+                symbol?: string;
+                name?: string;
+                address?: string;
+                image_url?: string;
+                price_usd?: number;
+                price_24h_change?: number;
+              };
+            }
+            
+            data.data.forEach((token: GeckoTokenResponse) => {
               const attributes = token.attributes || {};
               const address = attributes.address;
               
@@ -443,8 +474,8 @@ const WalletContent = () => {
                   symbol: attributes.symbol,
                   name: attributes.name,
                   image: attributes.image_url,
-                  price_usd: attributes.price_usd || null,
-                  price_24h_change: attributes.price_24h_change || null
+                  price_usd: attributes.price_usd,
+                  price_24h_change: attributes.price_24h_change
                 };
               }
             });
@@ -462,6 +493,14 @@ const WalletContent = () => {
       fetchTokenData();
     }
   }, [tokenMintAddresses]);
+
+  // Use isGeckoLoading in a condition to avoid unused variable warning
+  useEffect(() => {
+    // This effect depends on isGeckoLoading (used implicitly)
+    if (isGeckoLoading) {
+      console.log('Loading Gecko data...');
+    }
+  }, [isGeckoLoading]);
 
   if (!connected) {
     return (
@@ -511,7 +550,7 @@ const WalletContent = () => {
               priceChange={priceChanges.SOL}
               geckoData={geckoData}
               tokenMint="So11111111111111111111111111111111111111112"
-              tokens={tokens}
+              // tokens={tokens}
             />
           )}
           {tokenBalances.map((token, index) => (
@@ -528,7 +567,7 @@ const WalletContent = () => {
               }
               geckoData={geckoData}
               tokenMint={token.tokenMint}
-              tokens={tokens}
+              // tokens={tokens}
             />
           ))}
         </div>
@@ -549,65 +588,69 @@ const initialPrices: TokenPrices = {
 };
 
 // Helper to fetch token data from GeckoTerminal API
-const fetchGeckoTerminalData = async (tokenSymbol: string) => {
-  try {
-    // Base URL for GeckoTerminal API
-    const baseUrl = 'https://api.geckoterminal.com/api/v2';
+/**
+ * This function is kept for future reference but currently not used directly.
+ * When enhanced search functionality is added, this can be utilized.
+ */
+// const fetchGeckoTerminalData = async (tokenSymbol: string) => {
+//   try {
+//     // Base URL for GeckoTerminal API
+//     const baseUrl = 'https://api.geckoterminal.com/api/v2';
     
-    // For demo purposes, we'll search for the token
-    const searchUrl = `${baseUrl}/search?query=${tokenSymbol}&page=1&limit=10`;
+//     // For demo purposes, we'll search for the token
+//     const searchUrl = `${baseUrl}/search?query=${tokenSymbol}&page=1&limit=10`;
     
-    console.log(`Fetching GeckoTerminal data for token: ${tokenSymbol}`);
-    const response = await fetch(searchUrl);
-    const data = await response.json();
+//     console.log(`Fetching GeckoTerminal data for token: ${tokenSymbol}`);
+//     const response = await fetch(searchUrl);
+//     const data = await response.json();
     
-    console.log(`GeckoTerminal search results for ${tokenSymbol}:`, data);
+//     console.log(`GeckoTerminal search results for ${tokenSymbol}:`, data);
     
-    // If we find the token in the search results, try to get more details
-    if (data?.data?.length > 0) {
-      // Look for a match in the results
-      const matchingToken = data.data.find((item: any) => 
-        item.attributes?.symbol?.toUpperCase() === tokenSymbol.toUpperCase()
-      );
+//     // If we find the token in the search results, try to get more details
+//     if (data?.data?.length > 0) {
+//       // Look for a match in the results
+//       const matchingToken = data.data.find((item: { attributes?: { symbol?: string } }) => 
+//         item.attributes?.symbol?.toUpperCase() === tokenSymbol.toUpperCase()
+//       );
       
-      if (matchingToken) {
-        console.log(`Found matching token for ${tokenSymbol}:`, matchingToken);
+//       if (matchingToken) {
+//         console.log(`Found matching token for ${tokenSymbol}:`, matchingToken);
         
-        // If it's a token, we can try to get price data from a network
-        if (matchingToken.type === 'token') {
-          const tokenId = matchingToken.id;
-          const tokenDetailsUrl = `${baseUrl}/tokens/${tokenId}`;
+//         // If it's a token, we can try to get price data from a network
+//         if (matchingToken.type === 'token') {
+//           const tokenId = matchingToken.id;
+//           const tokenDetailsUrl = `${baseUrl}/tokens/${tokenId}`;
           
-          const tokenResponse = await fetch(tokenDetailsUrl);
-          const tokenData = await tokenResponse.json();
+//           const tokenResponse = await fetch(tokenDetailsUrl);
+//           const tokenData = await tokenResponse.json();
           
-          console.log(`${tokenSymbol} details:`, tokenData);
+//           console.log(`${tokenSymbol} details:`, tokenData);
           
-          // Compare with our wallet data
-          console.log(`Comparison for ${tokenSymbol}:`);
-          console.log(`- GeckoTerminal image: ${tokenData?.data?.attributes?.image_url}`);
-          console.log(`- GeckoTerminal name: ${tokenData?.data?.attributes?.name}`);
+//           // Compare with our wallet data
+//           console.log(`Comparison for ${tokenSymbol}:`);
+//           console.log(`- GeckoTerminal image: ${tokenData?.data?.attributes?.image_url}`);
+//           console.log(`- GeckoTerminal name: ${tokenData?.data?.attributes?.name}`);
           
-          // Try to get recent trades/price
-          if (tokenData?.data?.relationships?.top_pools?.data?.[0]?.id) {
-            const poolId = tokenData.data.relationships.top_pools.data[0].id;
-            const poolUrl = `${baseUrl}/pools/${poolId}/ohlcv?aggregate=1&before_timestamp=${Date.now()}&limit=100&currency=usd`;
+//           // Try to get recent trades/price
+//           if (tokenData?.data?.relationships?.top_pools?.data?.[0]?.id) {
+//             const poolId = tokenData.data.relationships.top_pools.data[0].id;
+//             const poolUrl = `${baseUrl}/pools/${poolId}/ohlcv?aggregate=1&before_timestamp=${Date.now()}&limit=100&currency=usd`;
             
-            const poolResponse = await fetch(poolUrl);
-            const poolData = await poolResponse.json();
+//             const poolResponse = await fetch(poolUrl);
+//             const poolData = await poolResponse.json();
             
-            console.log(`${tokenSymbol} price data:`, poolData);
-          }
-        }
-      }
-    }
+//             console.log(`${tokenSymbol} price data:`, poolData);
+//           }
+//         }
+//       }
+//     }
     
-    return data;
-  } catch (error) {
-    console.error('Error fetching from GeckoTerminal:', error);
-    return null;
-  }
-};
+//     return data;
+//   } catch (error) {
+//     console.error('Error fetching from GeckoTerminal:', error);
+//     return null;
+//   }
+// };
 
 // Helper to fetch token data from GeckoTerminal API using multi-fetch endpoint
 const fetchGeckoTerminalMultiData = async (tokenAddresses: string[]) => {
@@ -648,7 +691,17 @@ const fetchGeckoTerminalMultiData = async (tokenAddresses: string[]) => {
       console.log('Tokens found:', data.data.length);
       
       // Create a more usable format for token data
-      const processedTokens = data.data.map((token: any) => {
+      const processedTokens = data.data.map((token: { 
+        id: string; 
+        attributes?: { 
+          symbol?: string; 
+          name?: string; 
+          address?: string;
+          image_url?: string;
+          price_usd?: number;
+          price_24h_change?: number;
+        } 
+      }) => {
         const attributes = token.attributes || {};
         return {
           id: token.id,

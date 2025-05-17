@@ -1,9 +1,11 @@
 // src/lib/meteora/meteoraChatCommands.ts
-import { MeteoraDlmmService, DlmmPoolInfo } from './meteoraDlmmService';
+import { MeteoraDlmmService} from './meteoraDlmmService';
 import { MeteoraPositionService } from './meteoraPositionService';
-import { PublicKey, Connection } from '@solana/web3.js';
-import { BN } from 'bn.js';
-import { StrategyType } from '@meteora-ag/dlmm';
+import { PublicKey } from '@solana/web3.js';
+// import { MeteoraDlmmService, DlmmPoolInfo } from './meteoraDlmmService';
+// import { PublicKey, Connection } from '@solana/web3.js';
+// import { BN } from 'bn.js';
+// import { StrategyType } from '@meteora-ag/dlmm';
 
 // Command types
 export enum CommandType {
@@ -17,12 +19,47 @@ export enum CommandType {
   UNKNOWN
 }
 
+// Define the data types for different commands
+export interface PoolInfo {
+  name: string;
+  address: string;
+  price: string;
+  binStep: string;
+  tokenX?: string;
+  tokenY?: string;
+}
+
+export interface PositionInfo {
+  id: string;
+  bins: number;
+  totalValue?: number;
+}
+
+export interface CommandData {
+  // For GET_POOLS
+  pools?: PoolInfo[];
+  // For GET_POSITION
+  positions?: PositionInfo[];
+  // For ADD_LIQUIDITY
+  amount?: number;
+  token?: string;
+  // For SWAP
+  fromToken?: string;
+  toToken?: string;
+  // For commands that require a pool
+  poolAddress?: string;
+  // For position-related commands
+  positionId?: string;
+  // For REMOVE_LIQUIDITY
+  percentage?: number;
+}
+
 // Command result interface
 export interface CommandResult {
   type: CommandType;
   success: boolean;
   message: string;
-  data?: any;
+  data?: CommandData;
   error?: string;
 }
 

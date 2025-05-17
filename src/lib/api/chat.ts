@@ -38,12 +38,12 @@ interface MessageForAPI {
         const errorData = await response.json();
         errorMessage = errorData.error || errorMessage;
         console.error('API error details:', errorData);
-      } catch (e) {
+      } catch {
         // If we can't parse JSON, try getting text
         try {
           const errorText = await response.text();
           if (errorText) errorMessage = errorText;
-        } catch (textError) {
+        } catch {
           // Ignore text parsing errors
         }
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ interface ZeusBridgeConfig {
 type TransactionStatus = 'idle' | 'pending' | 'completed' | 'failed';
 
 const Zeus = () => {
-  const { publicKey, connected } = useWallet();
+  const { connected } = useWallet();
   
   // States
   const [amount, setAmount] = useState<string>('');

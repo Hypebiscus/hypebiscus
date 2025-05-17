@@ -23,6 +23,9 @@ const DlmmSwap = () => {
 
   // Fetch pools
   useEffect(() => {
+    // Skip if service is not available yet
+    if (!service) return;
+    
     const fetchPools = async () => {
       setLoading(true);
       try {
@@ -39,7 +42,7 @@ const DlmmSwap = () => {
     };
 
     fetchPools();
-  }, []);
+  }, [service]); // Add service as dependency
 
   // Handle pool selection
   const handlePoolSelect = (pool: DlmmPoolInfo) => {

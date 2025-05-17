@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
@@ -13,8 +13,8 @@ const DlmmPools = () => {
   const [selectedPool, setSelectedPool] = useState<string | null>(null);
   const [activeBinPrice, setActiveBinPrice] = useState<number | null>(null);
 
-  // Fetch pools
-  const fetchPools = async () => {
+  // Fetch pools - wrapped in useCallback to prevent dependency changes on re-renders
+  const fetchPools = useCallback(async () => {
     setLoading(true);
     try {
       const poolsData = await service.getAllPools();
@@ -24,7 +24,7 @@ const DlmmPools = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [service]); // Add service as dependency
 
   // Get active bin for a specific pool
   const getActiveBin = async (poolAddress: string) => {
@@ -39,7 +39,7 @@ const DlmmPools = () => {
 
   useEffect(() => {
     fetchPools();
-  }, [fetchPools]); // Add fetchPools here
+  }, [fetchPools]); // Now fetchPools is properly memoized
 
   return (
     <Card className="relative overflow-hidden">
@@ -75,7 +75,7 @@ const DlmmPools = () => {
               </Button>
             </div>
             <div className="space-y-3 mt-2">
-              {pools.slice(0, 5).map((pool, index) => (
+              {pools.slice(0, 5).map((pool) => (
                 <div 
                   key={pool.address} 
                   className={`p-3 border ${selectedPool === pool.address ? 'border-primary' : 'border-border'} rounded-lg`}

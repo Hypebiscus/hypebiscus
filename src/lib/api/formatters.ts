@@ -14,7 +14,7 @@ export const formatPoolData = (searchTerm: string, data: PoolsResponse): string 
     // Include a note about the "Add Liquidity" buttons
     formattedMessage += `You can interact with these pools using the buttons below each pool listing.\n\n`;
     
-    data.groups.forEach((group: { name: any; pairs: Pool[]; }) => {
+    data.groups.forEach((group: { name: string; pairs: Pool[]; }) => {
       formattedMessage += `**${group.name} Pools**\n\n`;
       
       if (group.pairs && group.pairs.length > 0) {

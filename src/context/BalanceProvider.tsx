@@ -66,7 +66,7 @@ export const BalanceProvider: React.FC<{ children: ReactNode; initialPrices: Tok
           console.log(`Found token: ${symbol}, balance: ${tokenBalance}`);
           
           // Use the price from tokenPrices or default to 0
-          const price = tokenPrices[symbol as keyof TokenPrices] || 0;
+          // const price = tokenPrices[symbol as keyof TokenPrices] || 0;
           
           return {
             tokenSymbol: symbol,
