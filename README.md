@@ -1,4 +1,4 @@
-![Hypebiscus](https://drive.google.com/file/d/1_8Mp05ZsqOdlgohyGXPq1gdzDnieKIba/view?usp=sharing)
+![Hypebiscus](https://github.com/user-attachments/assets/8c48c937-513c-4a06-8c2b-ff1e791f3e2c)
 
 ## Welcome to Hypebiscus.
 
