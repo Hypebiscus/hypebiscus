@@ -45,7 +45,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
         <div key={index}>
           {/* Pool Header */}
           <div className="border border-primary rounded-2xl px-6 py-4">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between lg:items-center items-start">
               <h4 className="text-white font-bold text-lg">{pool.name}</h4>
               <div className="flex flex-col items-end">
                 <span className="text-2xl font-bold">{pool.apy} </span>
@@ -53,9 +53,9 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
               </div>
             </div>
 
-            <div className="mt-4">
+            <div className="lg:mt-4 mt-6">
               {/* Pool Stats */}
-              <div className="flex gap-6">
+              <div className="flex flex-wrap lg:flex-row gap-6">
                 <div>
                   <div className="text-xs text-white/60">
                     Total Value Locked
@@ -79,11 +79,11 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-between items-center mt-6">
-              <div className="flex gap-2">
+            <div className="flex flex-col lg:flex-row justify-between lg:items-center mt-6">
+              <div className="flex flex-col lg:flex-row gap-2">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="text-[#1BE3C2] bg-[#1be3c233] rounded-full px-4 py-1 font-semibold text-sm flex items-center gap-2 cursor-help">
+                    <span className="text-[#1BE3C2] bg-[#1be3c233] rounded-full px-4 py-1 font-semibold text-sm flex items-center justify-center gap-2 cursor-help">
                       Audited <ArrowSquareIn size={16} />
                     </span>
                   </TooltipTrigger>
@@ -99,7 +99,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
                     </ul>
                   </TooltipContent>
                 </Tooltip>
-                <span className=" bg-[#efb54b33] rounded-full px-4 py-1 font-semibold text-sm">
+                <span className=" bg-[#efb54b33] rounded-full px-4 py-1 font-semibold text-sm flex flex-col lg:flex-row justify-center items-center">
                   Impermanent Loss Risk: <span className="text-[#EFB54B]">Moderate</span>
                 </span>
               </div>
@@ -109,7 +109,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
                   size="secondary"
                   onClick={() => onAddLiquidity(pool)}
                   disabled={!connected || isLoading}
-                  className="flex-1"
+                  className="w-full lg:w-fit mt-6 lg:mt-0"
                 >
                   {connected
                     ? "Invest in this Pool"

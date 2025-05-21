@@ -32,7 +32,7 @@ const Header = () => {
   }, []);
 
   return (
-    <div className="flex justify-between items-center pt-4">
+    <div className="flex justify-between items-center lg:px-[70px] px-4 py-6">
       <Image src="/hypebiscus_logo.png" alt="Hypebiscus" width={70} height={70} unoptimized/>
       <div className="flex items-center gap-4">
         <NavigationMenu className="lg:hidden block">
