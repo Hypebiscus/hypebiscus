@@ -491,9 +491,9 @@ const ChatBox: React.FC = () => {
   // ------------------------------------------------------------
 
   // Format time for display - kept for potential future use but marked with a comment instead of ts-expect-error
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
+  // const formatTime = (date: Date) => {
+  //   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // };
   // Note: formatTime is currently unused but will be used in future enhancements for message timestamps
 
   // Helper function to safely format percentage values
@@ -522,10 +522,10 @@ const ChatBox: React.FC = () => {
   }, [messages, currentPools]);
 
   // Convert the original Message[] format to the simplified format needed for ChatMessage component
-  const simplifiedMessages = messages.map((msg) => ({
-    role: msg.role,
-    content: msg.content,
-  }));
+  // const simplifiedMessages = messages.map((msg) => ({
+  //   role: msg.role,
+  //   content: msg.content,
+  // }));
 
   // Render component - using the new structure
   if (showWelcomeScreen) {
