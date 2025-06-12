@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { ChartLine, Clock, Plus, Wallet } from "@phosphor-icons/react";
+import { ChartLine, Clock, Plus, Wallet , ArrowClockwise } from "@phosphor-icons/react";
 import BtcPoolsList from "./BtcPoolsList";
 import AddLiquidityModal from "./AddLiquidityModal";
 import QuickActionButtons from "./QuickActionButtons";
@@ -89,7 +89,7 @@ const ChatBox: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // DLMM Service
+
 
   // Helper function to safely format currency values - must be defined before it's used
   const formatCurrencyValue = useCallback(
@@ -157,10 +157,10 @@ const ChatBox: React.FC = () => {
         // Use different search terms based on portfolio style
         const searchTerms =
           style === "conservative"
-            ? ["wbtc-sol"] // Conservative: only wBTC-SOL
+            ? ["wbtc-sol", "zbtc-sol"] // Conservative: only wBTC-SOL
             : style === "moderate"
             ? ["wbtc-sol", "zbtc-sol"] // Moderate: both pairs for diversification
-            : ["zbtc-sol"]; // Aggressive: only zBTC-SOL
+            : ["wbtc-sol", "zbtc-sol"]; // Aggressive: only zBTC-SOL
 
         let allPools: ApiPool[] = [];
 
@@ -488,6 +488,34 @@ const ChatBox: React.FC = () => {
     showBestYieldPool(style);
   };
 
+     // Handle refresh pools functionality
+  const handleRefreshPools = useCallback(async () => {
+    if (!selectedPortfolioStyle) {
+      addMessage(
+        "assistant",
+        "Please select a portfolio style first to get pool recommendations."
+      );
+      return;
+    }
+
+    setIsPoolLoading(true);
+    try {
+      await showBestYieldPool(selectedPortfolioStyle);
+      addMessage(
+        "assistant", 
+        `I've found fresh ${selectedPortfolioStyle} BTC pools with updated data!`
+      );
+    } catch (error) {
+      console.error("Error refreshing pools:", error);
+      addMessage(
+        "assistant",
+        "Sorry, I couldn't refresh the pools right now. Please try again later."
+      );
+    } finally {
+      setIsPoolLoading(false);
+    }
+  }, [selectedPortfolioStyle, showBestYieldPool, addMessage]);
+  
   // ------------------------------------------------------------
 
   // Format time for display - kept for potential future use but marked with a comment instead of ts-expect-error
@@ -611,7 +639,24 @@ const ChatBox: React.FC = () => {
 
   return (
     <div className="flex flex-col lg:h-[calc(100vh-140px)] h-[calc(100vh-130px)] lg:max-w-4xl mx-auto">
-      <div className="flex justify-end lg:mb-10 mb-4">
+      <div className="flex justify-end lg:mb-10 mb-4 gap-2">
+        {selectedPortfolioStyle && (
+          <Button
+            variant="secondary"
+            size="secondary"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20"
+            onClick={handleRefreshPools}
+            disabled={isPoolLoading}
+            title="Find different BTC pools with your current portfolio style"
+          >
+            <ArrowClockwise 
+              size={16}
+              className={isPoolLoading ? 'animate-spin' : ''} 
+            />
+            {isPoolLoading ? 'Finding...' : 'Refresh Pools'}
+          </Button>
+        )}
+
         <Button
           variant="secondary"
           size="secondary"
