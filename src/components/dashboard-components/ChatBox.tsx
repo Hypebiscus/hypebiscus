@@ -817,7 +817,7 @@ const ChatBox: React.FC = () => {
       formatCurrencyValue,
       //selectedPortfolioStyle,
       shownPoolAddresses,
-      //differentPoolRequests,
+      differentPoolRequests,
     ]
   );
 
