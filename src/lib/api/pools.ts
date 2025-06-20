@@ -8,6 +8,7 @@ export interface Pool {
     apy: number;
     fees_24h: number;
     trade_volume_24h: number;
+    bin_step?: number;
   }
   
   export interface Group {
@@ -27,7 +28,7 @@ export interface Pool {
    */
   export const fetchPools = async (searchTerm: string): Promise<PoolsResponse> => {
     const response = await fetch(
-      `https://dlmm-api.meteora.ag/pair/all_by_groups?search_term=${searchTerm}&hide_low_apr=true`
+      `https://dlmm-api.meteora.ag/pair/all_by_groups?search_term=${searchTerm}`
     );
     
     if (!response.ok) {
