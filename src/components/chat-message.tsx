@@ -42,7 +42,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, streamingMessage, is
       <div
         className={`max-w-full ${
           isUser
-            ? "bg-white/10 border border-border text-white text-right rounded-full py-2 px-4"
+            ? "bg-white/10 border border-border text-white text-left rounded-full py-2 px-4"
             : isWelcomeMessage 
               ? "[&>*:not(:first-child)]:mt-8" 
               : "pt-8"
