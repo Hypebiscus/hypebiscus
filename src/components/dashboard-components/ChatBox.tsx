@@ -92,10 +92,7 @@ const ChatBox: React.FC = () => {
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
   // Add a state to track shown pool addresses to avoid duplicates
   const [shownPoolAddresses, setShownPoolAddresses] = useState<string[]>([]);
-  // Track shown bin configurations to avoid showing the same bin setup
-  const [shownBinConfigs, setShownBinConfigs] = useState<
-    { poolName: string; binStep: number }[]
-  >([]);
+ 
   // Track shown bin steps per portfolio style
   const [shownBinStepsPerStyle, setShownBinStepsPerStyle] = useState<{
     [style: string]: number[];
@@ -114,97 +111,11 @@ const ChatBox: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
 
   // Add a function to manually scroll to the bottom
-  const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  }, []);
-
-  // Helper function to get pool reasons based on portfolio style
-  const getPoolReasons = (
-    style: string,
-    pool: ApiPool,
-    formatter: (
-      value: string | number | undefined,
-      decimals?: number
-    ) => string,
-    fees24h: number,
-    feeAPY: number,
-    binStep?: number | string
-  ) => {
-    const reasons = [];
-
-    // First reason based on style and bin step
-    if (style === "conservative") {
-      reasons.push(
-        `Capital preservation focus — $${formatter(
-          pool.liquidity,
-          0
-        )} liquidity with a bin step of ${binStep} provides stability and reduces price impact during market fluctuations.`
-      );
-    } else if (style === "moderate") {
-      reasons.push(
-        `Balanced metrics — $${formatter(
-          pool.liquidity,
-          0
-        )} TVL with a bin step of ${binStep} combined with ${feeAPY.toFixed(
-          2
-        )}% yield offers an optimal risk-reward profile.`
-      );
-    } else {
-      reasons.push(
-        `High yield potential — ${feeAPY.toFixed(
-          2
-        )}% annualized returns with a bin step of ${binStep} provides maximum earning opportunity for risk-tolerant investors.`
-      );
-    }
-
-    // Volume-based reason
-    reasons.push(
-      `Active trading — $${formatter(
-        pool.trade_volume_24h,
-        0
-      )} daily volume indicates strong market participation and ease of exit.`
-    );
-
-    // Fee-based reason
-    reasons.push(
-      `Revenue generation — $${formatter(
-        fees24h,
-        2
-      )} collected in fees yesterday demonstrates actual earning potential.`
-    );
-
-    // Trading activity reason
-    if (parseFloat(String(pool.trade_volume_24h)) > 1000000) {
-      reasons.push(
-        "High demand trading pair — market participants heavily favor this asset combination."
-      );
-    } else {
-      reasons.push(
-        "Sustainable activity — trading frequency supports reliable returns without excessive volatility."
-      );
-    }
-
-    // Final recommendation reason
-    if (style === "conservative") {
-      reasons.push(
-        "Lower volatility profile — prioritizing higher TVL typically results in more stable price action."
-      );
-    } else if (style === "moderate") {
-      reasons.push(
-        "Strategic positioning — this pool balances upside potential with downside protection."
-      );
-    } else {
-      reasons.push(
-        "Maximum return focus — designed for investors willing to accept higher volatility for increased yield."
-      );
-    }
-
-    return reasons;
-  };
-
-  // DLMM Service
+//   const scrollToBottom = useCallback(() => {
+//     setTimeout(() => {
+//       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+//     }, 100);
+//   }, []);
 
   // Helper function to safely format currency values - must be defined before it's used
   const formatCurrencyValue = useCallback(
@@ -881,12 +792,6 @@ const ChatBox: React.FC = () => {
             },
           ];
 
-          // Add an empty assistant message to start streaming into
-          const placeholderMessage = {
-            role: "assistant",
-            content: "",
-            timestamp: new Date()
-          };
           addMessage("assistant", "", undefined);
 
           // Reset streaming state
@@ -1008,12 +913,6 @@ const ChatBox: React.FC = () => {
             },
           ];
 
-          // Add an empty assistant message to start streaming into
-          const placeholderMessage = {
-            role: "assistant",
-            content: "",
-            timestamp: new Date()
-          };
           addMessage("assistant", "", undefined);
 
           // Reset streaming state
@@ -1073,6 +972,7 @@ const ChatBox: React.FC = () => {
       addErrorMessage,
       showBestYieldPool,
       shownPoolAddresses,
+      shownBinStepsPerStyle
     ]
   );
 
@@ -1311,7 +1211,7 @@ const ChatBox: React.FC = () => {
   // Render component - using the new structure
   if (showWelcomeScreen) {
     return (
-      <div className="flex flex-col lg:h-[calc(100vh-140px)] h-[calc(100vh-130px)] w-full lg:max-w-4xl mx-auto">
+      <div className="flex flex-col h-[calc(100vh-100px)] w-full lg:max-w-4xl mx-auto">
         <div className="flex-1 flex flex-col items-center justify-start p-6 lg:mt-14">
           <h1 className="lg:text-3xl text-xl font-bold text-primary mb-2">
             Welcome to Hypebiscus

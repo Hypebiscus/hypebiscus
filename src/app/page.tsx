@@ -1,6 +1,6 @@
 "use client";
 
-import News from "@/components/dashboard-components/News";
+// import News from "@/components/dashboard-components/News";
 import ChatBox from "@/components/dashboard-components/ChatBox";
 import Header from "@/components/header";
 import Menu from "@/components/menu";

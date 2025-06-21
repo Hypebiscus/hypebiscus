@@ -3,7 +3,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { ArrowSquareIn, Check } from "@phosphor-icons/react";
+import { ArrowSquareIn} from "@phosphor-icons/react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface Pool {
@@ -225,7 +225,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
                 {isStreaming ? (
                   <div className="whitespace-pre-wrap text-white">
                     {/* Show content up to the split point */}
-                    {streamingContent && streamingContent.substring(0, splitPoint)}
+                    <p className="whitespace-pre-wrap text-white">{streamingContent && streamingContent.substring(0, splitPoint)}</p>
                     {!shouldShowPart2 && <span className="animate-pulse">▊</span>}
                   </div>
                 ) : (
@@ -243,7 +243,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
                 {isStreaming && shouldShowPart2 ? (
                   <div className="whitespace-pre-wrap text-white">
                     {/* Show content after the split point */}
-                    {streamingContent && streamingContent.substring(splitPoint)}
+                    <p className="whitespace-pre-wrap text-white">{streamingContent && streamingContent.substring(splitPoint)}</p>
                     <span className="animate-pulse">▊</span>
                   </div>
                 ) : (

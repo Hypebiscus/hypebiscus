@@ -5,6 +5,24 @@ interface MessageForAPI {
     content: string;
     timestamp?: Date;
   }
+
+// Import the Pool interface type
+interface Pool {
+  name: string;
+  address: string;
+  liquidity: string;
+  currentPrice: string;
+  apy: string;
+  fees24h: string;
+  volume24h: string;
+  binStep?: string;
+  // Optional enhanced data
+  estimatedDailyEarnings?: string;
+  investmentAmount?: string;
+  riskLevel?: string;
+  reasons?: string[];
+  risks?: string[];
+}
   
   /**
    * Send message to chat API
@@ -16,7 +34,7 @@ interface MessageForAPI {
    */
   export const fetchMessage = async (
     messages: MessageForAPI[],
-    poolData?: any,
+    poolData?: Pool,
     portfolioStyle?: string,
     onStreamUpdate?: (chunk: string) => void
   ): Promise<string> => {

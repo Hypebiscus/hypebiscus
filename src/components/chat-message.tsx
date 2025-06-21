@@ -44,7 +44,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, streamingMessage, is
           isUser
             ? "bg-white/10 border border-border text-white text-right rounded-full py-2 px-4"
             : isWelcomeMessage 
-              ? "mt-0" 
+              ? "[&>*:not(:first-child)]:mt-8" 
               : "pt-8"
         }`}
       >
