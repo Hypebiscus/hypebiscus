@@ -16,9 +16,9 @@ export default function Home() {
         <div className="flex-1">
           <ChatBox />
         </div>
-        <div className="lg:w-[408px]">
+        {/* <div className="lg:w-[408px]">
           <News />
-        </div>
+        </div> */}
       </main>
     </div>
   );

@@ -41,7 +41,7 @@ const QuickActionButtons: React.FC<QuickActionButtonsProps> = ({
   };
 
   return (
-    <div className="w-[300px] md:w-full overflow-hidden flex ">
+    <div className="w-[330px] md:w-full overflow-hidden flex ">
       <div className="flex overflow-x-auto scrollbar-hide gap-2 mb-3">
         {quickActions.map((action, index) => (
           <Button

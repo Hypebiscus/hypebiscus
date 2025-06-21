@@ -2,16 +2,17 @@
 
 import React from "react";
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface ChatMessageProps {
-  message: Message;
+  message: {
+    role: string;
+    content: string;
+    timestamp?: Date;
+  };
+  streamingMessage?: string | null;
+  isStreaming?: boolean;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ message, streamingMessage, isStreaming }) => {
   const isUser = message.role === "user";
 
   // Format message content with line breaks
@@ -22,16 +23,38 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     </React.Fragment>
   ));
 
+  // Format streaming message content with line breaks if available
+  const formattedStreamingContent = streamingMessage?.split("\n").map((line, i) => (
+    <React.Fragment key={i}>
+      {line}
+      {i < streamingMessage.split("\n").length - 1 && <br />}
+    </React.Fragment>
+  ));
+
+  // Check if this is a welcome message
+  const isWelcomeMessage = !isUser && 
+    (message.content.includes("Welcome to Hypebiscus") || 
+     message.content.includes("portfolio style") || 
+     message.content.toLowerCase().includes("welcome"));
+
   return (
     <div className={`flex ${isUser ? "justify-end [&:not(:first-child)]:mt-8" : "justify-start"}`}>
       <div
-        className={`max-w-full  ${
+        className={`max-w-full ${
           isUser
             ? "bg-white/10 border border-border text-white text-right rounded-full py-2 px-4"
-            : "pt-8"
+            : isWelcomeMessage 
+              ? "mt-0" 
+              : "pt-8"
         }`}
       >
-        <div className="text-sm">{formattedContent}</div>
+        <p>
+          {!isUser && isStreaming && formattedStreamingContent 
+            ? formattedStreamingContent 
+            : formattedContent}
+          
+          {!isUser && isStreaming && <span className="inline-block animate-pulse">▌</span>}
+        </p>
       </div>
     </div>
   );

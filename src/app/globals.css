@@ -230,3 +230,14 @@ ul li {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;  /* Chrome, Safari and Opera */
 }
+
+
+@media (max-width: 768px) {
+  .wallet-adapter-button-trigger {
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+    font-size: 14px !important;
+    height: 100% !important;
+    line-height: 100% !important;
+  }
+}
