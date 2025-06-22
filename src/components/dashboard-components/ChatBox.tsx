@@ -92,7 +92,7 @@ const ChatBox: React.FC = () => {
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
   // Add a state to track shown pool addresses to avoid duplicates
   const [shownPoolAddresses, setShownPoolAddresses] = useState<string[]>([]);
- 
+
   // Track shown bin steps per portfolio style
   const [shownBinStepsPerStyle, setShownBinStepsPerStyle] = useState<{
     [style: string]: number[];
@@ -736,7 +736,7 @@ const ChatBox: React.FC = () => {
       currentPools,
       addMessage,
       formatCurrencyValue,
-      selectedPortfolioStyle,
+      //selectedPortfolioStyle,
       shownPoolAddresses,
       differentPoolRequests,
     ]
