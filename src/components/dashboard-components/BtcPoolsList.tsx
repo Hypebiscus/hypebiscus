@@ -5,26 +5,11 @@ import { Button } from "@/components/ui/button";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { ArrowSquareIn} from "@phosphor-icons/react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-
-interface Pool {
-  name: string;
-  address: string;
-  liquidity: string;
-  currentPrice: string;
-  apy: string;
-  fees24h: string;
-  volume24h: string;
-  // Optional enhanced data
-  riskLevel?: string;
-  estimatedDailyEarnings?: string;
-  investmentAmount?: string;
-  reasons?: string[];
-  risks?: string[];
-}
+import { FormattedPool } from "@/lib/utils/poolUtils";
 
 interface BtcPoolsListProps {
-  pools: Pool[];
-  onAddLiquidity: (pool: Pool) => void;
+  pools: FormattedPool[];
+  onAddLiquidity: (pool: FormattedPool) => void;
   isLoading: boolean;
   aiResponse?: string;
   aiResponsePart1?: string;
@@ -149,6 +134,12 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
                   <div className="text-xs text-white/60">24h Fee</div>
                   <div className="text-white font-semibold">
                     ${pool.fees24h}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/60">Bin Step</div>
+                  <div className="text-white font-semibold">
+                    {pool.binStep}
                   </div>
                 </div>
               </div>

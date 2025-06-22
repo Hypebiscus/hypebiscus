@@ -9,21 +9,12 @@ import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
 import { BN } from 'bn.js';
 import { StrategyType } from '@meteora-ag/dlmm';
-
-interface Pool {
-  name: string;
-  address: string;
-  liquidity: string;
-  currentPrice: string;
-  apy: string;
-  fees24h: string;
-  volume24h: string;
-}
+import { FormattedPool } from '@/lib/utils/poolUtils';
 
 interface AddLiquidityModalProps {
   isOpen: boolean;
   onClose: () => void;
-  pool: Pool | null;
+  pool: FormattedPool | null;
 }
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
@@ -181,7 +172,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-sub-text">
               <p className="mb-1">Current price: ${pool?.currentPrice}</p>
-              <p className="mb-1">Expected APY: {pool?.apy}%</p>
+              <p className="mb-1">Expected APY: {pool?.apy}</p>
+              <p className="mb-1">Bin Step: {pool?.binStep}</p>
               <p>Pool address: {pool?.address}</p>
             </div>
           </div>
