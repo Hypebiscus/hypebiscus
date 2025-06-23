@@ -92,10 +92,7 @@ const ChatBox: React.FC = () => {
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
   // Add a state to track shown pool addresses to avoid duplicates
   const [shownPoolAddresses, setShownPoolAddresses] = useState<string[]>([]);
-  // Track shown bin configurations to avoid showing the same bin setup
-  // const [shownBinConfigs, setShownBinConfigs] = useState<
-  //   { poolName: string; binStep: number }[]
-  // >([]);
+
   // Track shown bin steps per portfolio style
   const [shownBinStepsPerStyle, setShownBinStepsPerStyle] = useState<{
     [style: string]: number[];
@@ -109,91 +106,16 @@ const ChatBox: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Helper function to get pool reasons based on portfolio style
-  const getPoolReasons = (
-    style: string,
-    pool: ApiPool,
-    formatter: (
-      value: string | number | undefined,
-      decimals?: number
-    ) => string,
-    fees24h: number,
-    feeAPY: number,
-    binStep?: number | string
-  ) => {
-    const reasons = [];
+  // Add a state for the current streaming message
+  const [streamingMessage, setStreamingMessage] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
 
-    // First reason based on style and bin step
-    if (style === "conservative") {
-      reasons.push(
-        `Capital preservation focus — $${formatter(
-          pool.liquidity,
-          0
-        )} liquidity with a bin step of ${binStep} provides stability and reduces price impact during market fluctuations.`
-      );
-    } else if (style === "moderate") {
-      reasons.push(
-        `Balanced metrics — $${formatter(
-          pool.liquidity,
-          0
-        )} TVL with a bin step of ${binStep} combined with ${feeAPY.toFixed(
-          2
-        )}% yield offers an optimal risk-reward profile.`
-      );
-    } else {
-      reasons.push(
-        `High yield potential — ${feeAPY.toFixed(
-          2
-        )}% annualized returns with a bin step of ${binStep} provides maximum earning opportunity for risk-tolerant investors.`
-      );
-    }
-
-    // Volume-based reason
-    reasons.push(
-      `Active trading — $${formatter(
-        pool.trade_volume_24h,
-        0
-      )} daily volume indicates strong market participation and ease of exit.`
-    );
-
-    // Fee-based reason
-    reasons.push(
-      `Revenue generation — $${formatter(
-        fees24h,
-        2
-      )} collected in fees yesterday demonstrates actual earning potential.`
-    );
-
-    // Trading activity reason
-    if (parseFloat(String(pool.trade_volume_24h)) > 1000000) {
-      reasons.push(
-        "High demand trading pair — market participants heavily favor this asset combination."
-      );
-    } else {
-      reasons.push(
-        "Sustainable activity — trading frequency supports reliable returns without excessive volatility."
-      );
-    }
-
-    // Final recommendation reason
-    if (style === "conservative") {
-      reasons.push(
-        "Lower volatility profile — prioritizing higher TVL typically results in more stable price action."
-      );
-    } else if (style === "moderate") {
-      reasons.push(
-        "Strategic positioning — this pool balances upside potential with downside protection."
-      );
-    } else {
-      reasons.push(
-        "Maximum return focus — designed for investors willing to accept higher volatility for increased yield."
-      );
-    }
-
-    return reasons;
-  };
-
-  // DLMM Service
+  // Add a function to manually scroll to the bottom
+//   const scrollToBottom = useCallback(() => {
+//     setTimeout(() => {
+//       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+//     }, 100);
+//   }, []);
 
   // Helper function to safely format currency values - must be defined before it's used
   const formatCurrencyValue = useCallback(
@@ -658,7 +580,7 @@ const ChatBox: React.FC = () => {
                 `Adding pool with bin step ${binStep} to shown pools for ${style} portfolio`
               );
 
-              // Create formatted pool
+              // Create formatted pool without hardcoded analysis
               const formattedPool = {
                 name: selectedPool.name,
                 address: selectedPool.address,
@@ -673,69 +595,68 @@ const ChatBox: React.FC = () => {
                   selectedPool.trade_volume_24h,
                   0
                 ),
-                binStep: binStep.toString(), // Add bin step to the formatted pool
-                // Enhanced data for display
+                binStep: binStep.toString(),
                 estimatedDailyEarnings: (
                   (fees24h / liquidityValue) *
                   10000
                 ).toFixed(2),
                 investmentAmount: "10,000",
-                riskLevel: style || "conservative",
-                reasons: getPoolReasons(
-                  style || "conservative",
-                  selectedPool,
-                  formatCurrencyValue,
-                  fees24h,
-                  feeAPY,
-                  binStep
-                ),
-                risks: [
-                  // Market related risk
-                  "Market dynamics vary — future performance may differ from historical data as trading conditions evolve.",
-
-                  // Impermanent loss risk with different wording
-                  style === "conservative"
-                    ? "Price divergence impact — if token values change significantly relative to each other, returns may be affected by impermanent loss."
-                    : style === "moderate"
-                    ? "Asset correlation factor — substantial price differences between paired assets can impact expected returns."
-                    : "Volatility tradeoff — higher returns come with increased exposure to impermanent loss during market swings.",
-
-                  // Protocol/technical risk
-                  "Protocol considerations — while thoroughly audited, all DeFi interactions carry inherent smart contract risk.",
-
-                  // Style-specific risk
-                  style === "conservative"
-                    ? "Opportunity cost — selecting safety means potentially lower returns than more aggressive options."
-                    : style === "moderate"
-                    ? "Partial downside protection — moderate strategy provides some but not complete insulation from market downturns."
-                    : "Amplified movements — this pool may experience larger price fluctuations during market volatility.",
-                ],
+                riskLevel: style || "conservative"
               };
 
-              // Show success message with the pool
-              addMessage(
-                "assistant",
-                `${currentPools.length === 0 ? "Here's a" : "Here's another"} ${
-                  style ? `${style}` : "recommended"
-                } pool that matches your investment criteria. ${
-                  style ? (
-                    style === "conservative" ? (
-                      Number(binStep) === 50 ?
-                        `This pool has a bin step of ${binStep}, which is ideal for conservative investors as it provides maximum stability and reduced impermanent loss risk.` :
-                        `This pool has a bin step of ${binStep}.\n\nNote: This bin step is not typically recommended for conservative portfolios. Conservative portfolios usually prefer pools with bin step 50 for maximum stability. However, this pool still offers good liquidity and trading volume.`
-                    ) : style === "moderate" ? (
-                      (Number(binStep) === 10 || Number(binStep) === 15) ?
-                        `This pool has a bin step of ${binStep}, which is optimal for moderate investors seeking a balance between stability and yield potential.` :
-                        `This pool has a bin step of ${binStep}.\n\nNote: This bin step is not typically recommended for moderate portfolios. Moderate portfolios usually prefer pools with bin steps 10 or 15 for balanced risk-reward. However, this pool still offers good liquidity and trading volume.`
-                    ) : (
-                      Number(binStep) === 5 ?
-                        `This pool has a bin step of ${binStep}, which is perfect for aggressive investors as it provides concentrated liquidity to maximize yield potential.` :
-                        `This pool has a bin step of ${binStep}.\n\nNote: This bin step is not typically recommended for aggressive portfolios. Aggressive portfolios usually prefer pools with bin step 5 for maximum yield potential. However, this pool still offers good liquidity and trading volume.`
-                    )
-                  ) : `This pool has a bin step of ${binStep}, which affects the concentration of liquidity and potential returns.`
-                }`,
-                [formattedPool] // Pass a single pool with the message
-              );
+              // Use AI to analyze the pool instead of hardcoded messages
+              try {
+                // Add an empty assistant message with the pool data to start streaming into
+                addMessage("assistant", "", [formattedPool]);
+                
+                // Reset streaming state
+                setStreamingMessage("");
+                setIsStreaming(true);
+                
+                // Get AI analysis of the pool with streaming updates
+                const analysis = await fetchMessage(
+                  [], // Empty message history for pure analysis
+                  formattedPool,
+                  style || "conservative",
+                  (chunk) => {
+                    // Update the streaming message as chunks arrive
+                    setStreamingMessage(prev => (prev || "") + chunk);
+                  }
+                );
+                
+                // Update the placeholder message with the full response
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1].content = analysis;
+                  return newMessages;
+                });
+                
+                // Also update messageWithPools
+                setMessageWithPools(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1].message.content = analysis;
+                  return newMessages;
+                });
+                
+                // Reset streaming state
+                setStreamingMessage(null);
+                setIsStreaming(false);
+
+                // Optional: uncomment if you want to scroll to bottom when AI response is finished
+                // scrollToBottom();
+              } catch (error) {
+                console.error("Error getting AI analysis:", error);
+                // Reset streaming state
+                setStreamingMessage(null);
+                setIsStreaming(false);
+                
+                // Fallback message if AI analysis fails
+                addMessage(
+                  "assistant",
+                  `Here's a ${style || "recommended"} liquidity pool that matches your criteria. This ${formattedPool.name} pool has a bin step of ${formattedPool.binStep} and currently offers an APY of ${formattedPool.apy}.`,
+                  [formattedPool]
+                );
+              }
 
               // Remove the loading message from the messages array
               setMessages((prevMessages) => {
@@ -832,6 +753,9 @@ const ChatBox: React.FC = () => {
       setInputMessage("");
       setIsLoading(true);
 
+      // Add a small delay to ensure the user message is displayed first
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       try {
         // Check if message is about finding pools/recommendations
         const lowerCaseMessage = userMessage.toLowerCase();
@@ -868,9 +792,43 @@ const ChatBox: React.FC = () => {
             },
           ];
 
-          // Send to API
-          const response = await fetchMessage(messageHistory);
-          addMessage("assistant", response);
+          addMessage("assistant", "", undefined);
+
+          // Reset streaming state
+          setStreamingMessage("");
+          setIsStreaming(true);
+
+          // Send to API with streaming updates
+          const response = await fetchMessage(
+            messageHistory, 
+            undefined, 
+            undefined,
+            (chunk) => {
+              // Update the streaming message as chunks arrive
+              setStreamingMessage(prev => (prev || "") + chunk);
+            }
+          );
+          
+          // Update the placeholder message with the full response
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].content = response;
+            return newMessages;
+          });
+          
+          // Also update messageWithPools
+          setMessageWithPools(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].message.content = response;
+            return newMessages;
+          });
+          
+          // Reset streaming state
+          setStreamingMessage(null);
+          setIsStreaming(false);
+
+          // Optional: uncomment if you want to scroll to bottom when AI response is finished
+          // scrollToBottom();
         }
         // Check if user is asking for another pool
         else if (isAskingForAnotherPool) {
@@ -955,13 +913,53 @@ const ChatBox: React.FC = () => {
             },
           ];
 
-          // Send to API
-          const response = await fetchMessage(messageHistory);
-          addMessage("assistant", response);
+          addMessage("assistant", "", undefined);
+
+          // Reset streaming state
+          setStreamingMessage("");
+          setIsStreaming(true);
+
+          // Send to API with streaming updates
+          const response = await fetchMessage(
+            messageHistory, 
+            undefined, 
+            undefined,
+            (chunk) => {
+              // Update the streaming message as chunks arrive
+              setStreamingMessage(prev => (prev || "") + chunk);
+            }
+          );
+          
+          // Update the placeholder message with the full response
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].content = response;
+            return newMessages;
+          });
+          
+          // Also update messageWithPools
+          setMessageWithPools(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].message.content = response;
+            return newMessages;
+          });
+          
+          // Reset streaming state
+          setStreamingMessage(null);
+          setIsStreaming(false);
+
+          // Optional: uncomment if you want to scroll to bottom when AI response is finished
+          // scrollToBottom();
         }
       } catch (error) {
         console.error("Error sending message:", error);
         addErrorMessage(error);
+        // Reset streaming state
+        setStreamingMessage(null);
+        setIsStreaming(false);
+
+        // Optional: uncomment if you want to scroll to bottom when error message is shown
+        // scrollToBottom();
       } finally {
         setIsLoading(false);
       }
@@ -974,6 +972,7 @@ const ChatBox: React.FC = () => {
       addErrorMessage,
       showBestYieldPool,
       shownPoolAddresses,
+      shownBinStepsPerStyle
     ]
   );
 
@@ -995,30 +994,91 @@ const ChatBox: React.FC = () => {
   };
 
   // Handle portfolio style selection
-  const handleSelectPortfolioStyle = (style: string) => {
+  const handleSelectPortfolioStyle = async (style: string) => {
     setSelectedPortfolioStyle(style);
 
-    if (!showWelcomeScreen) {
-      // Not first-time selection
-      addMessage(
-        "assistant",
-        `You've selected the ${
-          style.charAt(0).toUpperCase() + style.slice(1)
-        } portfolio style. I'll recommend pools that match your risk preference.`
-      );
-    } else {
-      // First-time selection from welcome screen
-      setShowWelcomeScreen(false);
-      addMessage(
-        "assistant",
-        `Welcome! You've selected the ${
-          style.charAt(0).toUpperCase() + style.slice(1)
-        } portfolio style. I'll recommend pools that match your risk preference.`
-      );
-    }
+    try {
+      // Add an empty assistant message to start streaming into
+      if (!showWelcomeScreen) {
+        // Not first-time selection
+        addMessage("assistant", "", undefined);
+      } else {
+        // First-time selection from welcome screen
+        setShowWelcomeScreen(false);
+        addMessage("assistant", "", undefined);
+      }
 
-    // Always show pool recommendations, regardless of whether we're coming from welcome screen
-    showBestYieldPool(style);
+      // Reset streaming state
+      setStreamingMessage("");
+      setIsStreaming(true);
+      
+      // Generate welcome message using AI with streaming updates
+      const welcomeMessage = await fetchMessage(
+        [{ 
+          role: "user", 
+          content: `I've selected the ${style} portfolio style. Please provide a well-structured welcome message explaining what this means for my liquidity pool recommendations. Format it with clear bullet points for the key characteristics of this portfolio style and end with a brief question about what I'm interested in learning more about.` 
+        }],
+        undefined,
+        style,
+        (chunk) => {
+          // Update the streaming message as chunks arrive
+          setStreamingMessage(prev => (prev || "") + chunk);
+        }
+      );
+
+      // Update the placeholder message with the full response
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].content = welcomeMessage;
+        return newMessages;
+      });
+      
+      // Also update messageWithPools
+      setMessageWithPools(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].message.content = welcomeMessage;
+        return newMessages;
+      });
+      
+      // Reset streaming state
+      setStreamingMessage(null);
+      setIsStreaming(false);
+
+      // Optional: uncomment if you want to scroll to bottom when welcome message is finished
+      // scrollToBottom();
+
+      // Always show pool recommendations, regardless of whether we're coming from welcome screen
+      showBestYieldPool(style);
+    } catch (error) {
+      console.error("Error generating welcome message:", error);
+      
+      // Reset streaming state
+      setStreamingMessage(null);
+      setIsStreaming(false);
+      
+      // Fallback to hardcoded messages if AI fails
+      if (!showWelcomeScreen) {
+        // Not first-time selection
+        addMessage(
+          "assistant",
+          `You've selected the ${
+            style.charAt(0).toUpperCase() + style.slice(1)
+          } portfolio style. I'll recommend pools that match your risk preference.`
+        );
+      } else {
+        // First-time selection from welcome screen
+        setShowWelcomeScreen(false);
+        addMessage(
+          "assistant",
+          `Welcome! You've selected the ${
+            style.charAt(0).toUpperCase() + style.slice(1)
+          } portfolio style. I'll recommend pools that match your risk preference.`
+        );
+      }
+      
+      // Show pool recommendations even if welcome message fails
+      showBestYieldPool(style);
+    }
   };
 
   // Handle refresh pools functionality
@@ -1034,10 +1094,6 @@ const ChatBox: React.FC = () => {
     setIsPoolLoading(true);
     try {
       await showBestYieldPool(selectedPortfolioStyle);
-      // addMessage(
-      //   "assistant",
-      //   `I've found fresh ${selectedPortfolioStyle} BTC pools with updated data!`
-      // );
     } catch (error) {
       console.error("Error refreshing pools:", error);
       addMessage(
@@ -1053,16 +1109,109 @@ const ChatBox: React.FC = () => {
 
   // Effects
   useEffect(() => {
-    // Add a small delay to ensure DOM updates have completed
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  }, [messages, currentPools]);
+    // Only scroll to bottom when a new user message is added or when showing the welcome screen
+    const lastMessage = messages[messages.length - 1];
+    const isUserMessage = lastMessage?.role === "user";
+    
+    if (isUserMessage || showWelcomeScreen) {
+      // Add a small delay to ensure DOM updates have completed
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    }
+  }, [messages, showWelcomeScreen]);
+
+  // Update the function to split the AI response into two parts, preserving questions
+  const splitAIResponse = (response: string): { part1: string, part2: string } => {
+    if (!response) return { part1: "", part2: "" };
+    
+    // Try to find natural split points
+    const splitKeywords = [
+      "Risk Considerations:", 
+      "Risk Analysis:", 
+      "Potential Risks:", 
+      "Risk Assessment:",
+      "Risk Factors:",
+      "Risk Profile:",
+      "Before investing, consider:",
+      "Important considerations:",
+      "Key risks to be aware of:",
+      "Risks to consider:"
+    ];
+    
+    // Check if any of the split keywords exist in the response
+    for (const keyword of splitKeywords) {
+      const index = response.indexOf(keyword);
+      if (index !== -1) {
+        return {
+          part1: response.substring(0, index).trim(),
+          part2: response.substring(index).trim()
+        };
+      }
+    }
+    
+    // Check for questions at the end of the response
+    const questionRegex = /\n\n(Have you considered|Would you like|Are you interested|What are your thoughts|How do you feel|Do you prefer|Are you looking|What's your|What is your|Do you have)[^?]+\?(\s*\n\n[^?]+\?)?$/i;
+    const questionMatch = response.match(questionRegex);
+    
+    // If there are questions at the end, make sure they go in the right part
+    if (questionMatch && questionMatch.index !== undefined) {
+      const questionStartIndex = questionMatch.index;
+      const questionText = questionMatch[0];
+      
+      // If the response is short, keep it all in part1
+      if (response.length < 500) {
+        return {
+          part1: response,
+          part2: ""
+        };
+      }
+      
+      // Try to split at a paragraph break before the questions
+      const contentBeforeQuestions = response.substring(0, questionStartIndex);
+      const paragraphs = contentBeforeQuestions.split("\n\n");
+      
+      if (paragraphs.length > 1) {
+        const midPoint = Math.floor(paragraphs.length / 2);
+        return {
+          part1: paragraphs.slice(0, midPoint).join("\n\n").trim(),
+          part2: paragraphs.slice(midPoint).join("\n\n").trim() + questionText
+        };
+      }
+    }
+    
+    // If no questions or natural split points, try to split at a paragraph break near the middle
+    const paragraphs = response.split("\n\n");
+    if (paragraphs.length > 1) {
+      const midPoint = Math.floor(paragraphs.length / 2);
+      return {
+        part1: paragraphs.slice(0, midPoint).join("\n\n").trim(),
+        part2: paragraphs.slice(midPoint).join("\n\n").trim()
+      };
+    }
+    
+    // If no paragraphs, just split in half
+    const midPoint = Math.floor(response.length / 2);
+    const sentenceEndNearMid = response.substring(0, midPoint).lastIndexOf(". ") + 1;
+    
+    if (sentenceEndNearMid > 0) {
+      return {
+        part1: response.substring(0, sentenceEndNearMid).trim(),
+        part2: response.substring(sentenceEndNearMid).trim()
+      };
+    }
+    
+    // If all else fails, just put everything in part1
+    return {
+      part1: response,
+      part2: ""
+    };
+  };
 
   // Render component - using the new structure
   if (showWelcomeScreen) {
     return (
-      <div className="flex flex-col lg:h-[calc(100vh-140px)] h-[calc(100vh-130px)] w-full lg:max-w-4xl mx-auto">
+      <div className="flex flex-col h-[calc(100vh-100px)] w-full lg:max-w-4xl mx-auto">
         <div className="flex-1 flex flex-col items-center justify-start p-6 lg:mt-14">
           <h1 className="lg:text-3xl text-xl font-bold text-primary mb-2">
             Welcome to Hypebiscus
@@ -1142,7 +1291,7 @@ const ChatBox: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col lg:h-[calc(100vh-140px)] h-[calc(100vh-130px)] lg:max-w-4xl mx-auto">
+    <div className="flex flex-col h-[calc(100vh-100px)]  lg:max-w-4xl mx-auto">
       <div className="flex justify-end lg:mb-10 mb-4 gap-2">
         {selectedPortfolioStyle && (
           <Button
@@ -1157,7 +1306,7 @@ const ChatBox: React.FC = () => {
               size={16}
               className={isPoolLoading ? "animate-spin" : ""}
             />
-            {isPoolLoading ? "Finding..." : "Refresh Pools"}
+            {isPoolLoading ? <span className="lg:inline hidden">Finding...</span> : <span className="lg:inline hidden">Refresh Pools</span>}
           </Button>
         )}
 
@@ -1180,7 +1329,7 @@ const ChatBox: React.FC = () => {
 
       {/* Scrollable chat messages area */}
       <div className="flex-1 overflow-y-auto lg:pb-8 pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-        <div className="flex flex-col">
+        <div className="flex flex-col [&:not(:first-child)]:mt-8">
           {messageWithPools.map((item, index, array) => {
             // Check if this is a loading or result message
             const isPoolMessage =
@@ -1204,26 +1353,71 @@ const ChatBox: React.FC = () => {
               array[index + 1].pools &&
               array[index + 1].pools!.length > 0;
 
+            // Check if this is the last assistant message and should show streaming content
+            const isLastMessage = index === array.length - 1;
+            const isAssistantMessage = item.message.role === "assistant";
+            const shouldShowStreaming = isLastMessage && isAssistantMessage && isStreaming;
+            // Determine if streaming should be shown in the pool list or in the regular message
+            const showStreamingInPool = shouldShowStreaming && item.pools && item.pools.length > 0;
+            const showStreamingInMessage = shouldShowStreaming && (!item.pools || item.pools.length === 0);
+
             return (
               <React.Fragment key={index}>
                 {/* Only show message if it's not a loading message that should be hidden */}
                 {!shouldHideLoadingMessage &&
                   (isLoadingState || !isPoolMessage) && (
                     <>
-                      <ChatMessage message={item.message} />
-                      {/* Add hr after AI responses that don't have pools */}
+                      {/* Don't show the AI message if it's already shown in BtcPoolsList */}
+                      {!(item.message.role === "assistant" && item.pools && item.pools.length > 0) && (
+                        <ChatMessage 
+                          message={item.message} 
+                          streamingMessage={showStreamingInMessage ? streamingMessage : undefined}
+                          isStreaming={showStreamingInMessage}
+                        />
+                      )}
+                      {/* Add hr after AI responses that don't have pools, but only if not streaming */}
                       {item.message.role === "assistant" &&
                         !item.pools &&
-                        !isLoadingState && <hr className="mt-8" />}
+                        !isLoadingState && 
+                        !showStreamingInMessage && <hr className="mt-8" />}
                     </>
                   )}
                 {item.pools && item.pools.length > 0 && (
                   <div className="w-full">
-                    <BtcPoolsList
-                      pools={item.pools}
-                      onAddLiquidity={handleAddLiquidity}
-                      isLoading={isPoolLoading}
-                    />
+                    {/* Split the AI response or use streaming content */}
+                    {(() => {
+                      // If streaming, show all content in the first part
+                      if (showStreamingInPool) {
+                        return (
+                          <BtcPoolsList
+                            pools={item.pools}
+                            onAddLiquidity={handleAddLiquidity}
+                            isLoading={isPoolLoading}
+                            aiResponse={item.message.content}
+                            aiResponsePart1=""  // Will be replaced by streaming content
+                            aiResponsePart2=""
+                            isStreaming={true}
+                            streamingContent={streamingMessage}
+                          />
+                        );
+                      } 
+                      // If not streaming, split the response
+                      else {
+                        const { part1, part2 } = splitAIResponse(item.message.content);
+                        return (
+                          <BtcPoolsList
+                            pools={item.pools}
+                            onAddLiquidity={handleAddLiquidity}
+                            isLoading={isPoolLoading}
+                            aiResponse={item.message.content}
+                            aiResponsePart1={part1}
+                            aiResponsePart2={part2}
+                            isStreaming={false}
+                            streamingContent={null}
+                          />
+                        );
+                      }
+                    })()}
 
                     <hr className="mt-8" />
                   </div>

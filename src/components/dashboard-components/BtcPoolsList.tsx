@@ -3,7 +3,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { ArrowSquareIn, Check } from "@phosphor-icons/react";
+import { ArrowSquareIn} from "@phosphor-icons/react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface Pool {
@@ -26,21 +26,96 @@ interface BtcPoolsListProps {
   pools: Pool[];
   onAddLiquidity: (pool: Pool) => void;
   isLoading: boolean;
+  aiResponse?: string;
+  aiResponsePart1?: string;
+  aiResponsePart2?: string;
+  isStreaming?: boolean;
+  streamingContent?: string | null;
 }
 
 const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
   pools,
   onAddLiquidity,
   isLoading,
+  aiResponse,
+  aiResponsePart1,
+  aiResponsePart2,
+  isStreaming,
+  streamingContent,
 }) => {
   const { connected } = useWallet();
+
+  // Helper function to find a good split point for streaming content
+  const findSplitPoint = (text: string): number => {
+    if (!text || text.length <= 400) return text?.length || 0;
+    
+    // Try to find a natural split point based on content
+    // Look for risk-related keywords first
+    const riskKeywords = [
+      "Risk Considerations:", 
+      "Risk Analysis:", 
+      "Potential Risks:", 
+      "Risk Assessment:",
+      "Risk Factors:",
+      "Risk Profile:",
+      "Before investing, consider:",
+      "Important considerations:",
+      "Key risks to be aware of:",
+      "Risks to consider:",
+      "Before you dive in"
+    ];
+    
+    for (const keyword of riskKeywords) {
+      const index = text.indexOf(keyword);
+      if (index !== -1 && index > text.length * 0.3) { // Ensure it's not too early in the text
+        return index;
+      }
+    }
+    
+    // Try to find a paragraph break near the middle
+    const midPoint = Math.floor(text.length * 0.6); // Slightly past middle for better distribution
+    const paragraphBreakAfter = text.indexOf("\n\n", midPoint);
+    const paragraphBreakBefore = text.lastIndexOf("\n\n", midPoint);
+    
+    // If we found paragraph breaks, use the closest one
+    if (paragraphBreakAfter !== -1 && paragraphBreakBefore !== -1) {
+      return (midPoint - paragraphBreakBefore) < (paragraphBreakAfter - midPoint)
+        ? paragraphBreakBefore + 2 // +2 to include the newline characters
+        : paragraphBreakAfter;
+    } else if (paragraphBreakAfter !== -1) {
+      return paragraphBreakAfter;
+    } else if (paragraphBreakBefore !== -1) {
+      return paragraphBreakBefore + 2;
+    }
+    
+    // If no paragraph breaks, try to find a sentence end
+    const sentenceEndAfter = text.indexOf(". ", midPoint);
+    const sentenceEndBefore = text.lastIndexOf(". ", midPoint);
+    
+    if (sentenceEndAfter !== -1 && sentenceEndBefore !== -1) {
+      return (midPoint - sentenceEndBefore) < (sentenceEndAfter - midPoint)
+        ? sentenceEndBefore + 2 // +2 to include the period and space
+        : sentenceEndAfter + 2;
+    } else if (sentenceEndAfter !== -1) {
+      return sentenceEndAfter + 2;
+    } else if (sentenceEndBefore !== -1) {
+      return sentenceEndBefore + 2;
+    }
+    
+    // If all else fails, just use the midpoint
+    return midPoint;
+  };
+
+  // Calculate split point for streaming content
+  const splitPoint = streamingContent ? findSplitPoint(streamingContent) : 0;
+  const shouldShowPart2 = streamingContent && streamingContent.length > 400;
 
   if (pools.length === 0) {
     return <p className="text-white">No pools found</p>;
   }
 
   return (
-    <div className="space-y-6 mt-4">
+    <div className="space-y-6 mt-8">
       {pools.map((pool, index) => (
         <div key={index}>
           {/* Pool Header */}
@@ -119,7 +194,6 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
             </div>
           </div>
 
-          {/* Rest of the component remains unchanged */}
           {/* Estimated Earnings Section */}
           {pool.estimatedDailyEarnings && (
             <div className="mt-4 bg-secondary rounded-2xl p-4 w-fit">
@@ -143,32 +217,39 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
             </div>
           )}
 
-          {/* Why this pool section */}
-          {pool.reasons && pool.reasons.length > 0 && (
-            <div className="mt-4  bg-[#1be3c233] rounded-2xl p-4">
-              <h5 className="text-base  font-bold mb-4">
-                Why this pool?
-              </h5>
-              <div className="space-y-2">
-                {pool.reasons.map((reason, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <Check size={16} className="text-[#1BE3C2]" />
-                    <p className="text-base text-white">{reason}</p>
+          {/* AI Analysis Part 1 - After Why this pool */}
+          {(aiResponsePart1 || isStreaming) && (
+            <div className="mt-4 bg-[#1be3c233] rounded-2xl p-4">
+              <h5 className="text-base font-bold mb-4">Why this pool?</h5>
+              <div className="prose prose-invert max-w-none">
+                {isStreaming ? (
+                  <div className="whitespace-pre-wrap text-white">
+                    {/* Show content up to the split point */}
+                    <p className="whitespace-pre-wrap text-white">{streamingContent && streamingContent.substring(0, splitPoint)}</p>
+                    {!shouldShowPart2 && <span className="animate-pulse">▊</span>}
                   </div>
-                ))}
+                ) : (
+                  <p className="whitespace-pre-wrap text-white">{aiResponsePart1 || aiResponse}</p>
+                )}
               </div>
             </div>
           )}
 
-          {/* Risk Notice */}
-          {pool.risks && pool.risks.length > 0 && (
+          {/* AI Analysis Part 2 - Before Risk Notice */}
+          {(aiResponsePart2 || shouldShowPart2) && (
             <div className="mt-4">
-              <p className="font-bold">Before You Dive In:</p>
-              <ul className="list-disc list-inside mt-1 space-y-1 text-base text-white font-normal">
-                {pool.risks.map((risk, i) => (
-                  <li key={i}>{risk}</li>
-                ))}
-              </ul>
+              <h5 className="text-base font-bold mb-4">Before You Dive In</h5>
+              <div className="prose prose-invert max-w-none">
+                {isStreaming && shouldShowPart2 ? (
+                  <div className="whitespace-pre-wrap text-white">
+                    {/* Show content after the split point */}
+                    <p className="whitespace-pre-wrap text-white">{streamingContent && streamingContent.substring(splitPoint)}</p>
+                    <span className="animate-pulse">▊</span>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap text-white">{aiResponsePart2}</p>
+                )}
+              </div>
             </div>
           )}
 

@@ -32,7 +32,7 @@ const Header = () => {
   }, []);
 
   return (
-    <div className="flex justify-between items-center lg:px-[70px] px-4 py-6">
+    <div className="flex justify-between items-center lg:px-[70px] px-4 lg:pt-4 pt-2 lg:pb-0 pb-2">
       <Image src="/hypebiscus_logo.png" alt="Hypebiscus" width={70} height={70} unoptimized/>
       <div className="flex items-center gap-4">
         <NavigationMenu className="lg:hidden block">
@@ -71,10 +71,12 @@ const Header = () => {
           <WalletMultiButton
             style={{
               backgroundColor: "var(--primary)",
-              padding: "4px 16px",
+              padding: "12px 16px",
               borderRadius: "12px",
               fontSize: "14px",
               fontFamily: "var(--font-sans)",
+              height: "100%",
+              lineHeight: "100%",
             }}
           />
         )}
