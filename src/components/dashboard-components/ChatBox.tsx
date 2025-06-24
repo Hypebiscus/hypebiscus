@@ -57,7 +57,6 @@ const ChatBox: React.FC = () => {
   const [inputMessage, setInputMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isPoolLoading, setIsPoolLoading] = useState(false);
-  const [currentPools, setCurrentPools] = useState<FormattedPool[]>([]);
   const [selectedPool, setSelectedPool] = useState<FormattedPool | null>(null);
   const [isAddLiquidityModalOpen, setIsAddLiquidityModalOpen] = useState(false);
   const [isPortfolioStyleModalOpen, setIsPortfolioStyleModalOpen] = useState(false);
@@ -73,7 +72,7 @@ const ChatBox: React.FC = () => {
   }>({ conservative: [], moderate: [], aggressive: [] });
   
   // Count requests for different pools to cycle through strategies
-  const [differentPoolRequests, setDifferentPoolRequests] = useState(0);
+  const [, setDifferentPoolRequests] = useState(0);
 
   const [messageWithPools, setMessageWithPools] = useState<MessageWithPool[]>([]);
 
@@ -409,9 +408,6 @@ const ChatBox: React.FC = () => {
                   )
               );
             });
-
-            // Update current pools for reference
-            setCurrentPools([formattedPool]);
           }
         } else {
           // No pools found after filtering
@@ -428,12 +424,10 @@ const ChatBox: React.FC = () => {
       }
     },
     [
-      currentPools,
       addMessage,
-      shownPoolAddresses,
-      differentPoolRequests,
       handleAsyncError,
-      addErrorMessage
+      addErrorMessage,
+      shownPoolAddresses
     ]
   );
 
@@ -644,7 +638,6 @@ const ChatBox: React.FC = () => {
       addMessage,
       addErrorMessage,
       showBestYieldPool,
-      shownPoolAddresses,
       shownBinStepsPerStyle
     ]
   );

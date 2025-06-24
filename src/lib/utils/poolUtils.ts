@@ -79,7 +79,7 @@ export function calculateFeeAPY(fees24h: number, tvl: number): number {
  */
 export function formatPool(
   apiPool: ApiPool, 
-  portfolioStyle: string = 'conservative',
+  riskLevel: string = 'conservative',
   investmentAmount: number = 10000
 ): FormattedPool {
   const fees24h = typeof apiPool.fees_24h === 'number' ? apiPool.fees_24h : 0;
@@ -102,7 +102,7 @@ export function formatPool(
     binStep,
     estimatedDailyEarnings: estimatedDailyEarnings.toFixed(2),
     investmentAmount: formatCurrencyValue(investmentAmount, 0),
-    riskLevel: portfolioStyle
+    riskLevel
   };
 }
 
@@ -115,8 +115,7 @@ export function filterPools(
 ): ApiPool[] {
   const {
     minTVL = 3000,
-    preferredBinSteps = [],
-    portfolioStyle = 'conservative'
+    preferredBinSteps = []
   } = options;
 
   return pools

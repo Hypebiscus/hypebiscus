@@ -2,7 +2,7 @@
 
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useCallback, useMemo } from 'react';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 
 interface EnhancedWalletState {
   // Wallet connection state
@@ -19,7 +19,7 @@ interface EnhancedWalletState {
   disconnect: () => Promise<void>;
   
   // Transaction utilities
-  signAndSendTransaction: (transaction: any, connection: Connection) => Promise<string>;
+  signAndSendTransaction: (transaction: Transaction, connection: Connection) => Promise<string>;
   
   // State checks
   canTransact: boolean;
@@ -66,7 +66,7 @@ export function useEnhancedWallet(): EnhancedWalletState {
 
   // Enhanced transaction sending with better error handling
   const signAndSendTransaction = useCallback(async (
-    transaction: any,
+    transaction: Transaction,
     connection: Connection
   ): Promise<string> => {
     if (!publicKey || !connected) {

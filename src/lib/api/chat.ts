@@ -28,13 +28,15 @@ interface ChatAPIRequest {
   portfolioStyle?: string;
 }
 
-interface ChatAPIError extends Error {
-  status?: number;
-  details?: string;
-}
-
-class ChatAPIError extends Error {
-  constructor(message: string, public status?: number, public details?: string) {
+/**
+ * Custom error class for chat API operations
+ */
+export class ChatAPIError extends Error {
+  constructor(
+    message: string, 
+    public readonly status?: number, 
+    public readonly details?: string
+  ) {
     super(message);
     this.name = 'ChatAPIError';
   }

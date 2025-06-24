@@ -1,8 +1,11 @@
-// src/lib/services/balanceService.ts
+// src/context/BalanceProvider.tsx
 
+import React, { createContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { TokenInfo } from '@solana/spl-token-registry';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useTokenData } from '@/hooks/useTokenData';
 import { TokenBalance, TokenPrices } from '@/lib/types';
 
 interface BalanceCalculation {
@@ -24,6 +27,23 @@ interface RawTokenAccount {
       };
     };
   };
+}
+
+interface BalanceContextType {
+  tokenPrices: TokenPrices | null;
+  solBalance: number | null;
+  tokenBalances: TokenBalance[];
+  loading: boolean;
+  totalBalance: number | null;
+  refetchBalances: () => Promise<void>;
+}
+
+// Create the context
+export const BalanceContext = createContext<BalanceContextType | undefined>(undefined);
+
+interface BalanceProviderProps {
+  children: React.ReactNode;
+  initialPrices: TokenPrices;
 }
 
 /**
@@ -208,6 +228,69 @@ export class BalanceService {
     return new BalanceService();
   }
 }
+
+export const BalanceProvider: React.FC<BalanceProviderProps> = ({ 
+  children, 
+  initialPrices 
+}) => {
+  const [tokenPrices] = useState<TokenPrices>(initialPrices);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
+  const [totalBalance, setTotalBalance] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const { publicKey, connected } = useWallet();
+  const tokens = useTokenData();
+
+  const balanceService = useMemo(() => new BalanceService(), []);
+
+  const fetchBalances = useCallback(async () => {
+    if (!connected || !publicKey || tokens.length === 0) {
+      setSolBalance(null);
+      setTokenBalances([]);
+      setTotalBalance(null);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await balanceService.fetchAllBalances(publicKey, tokens, tokenPrices);
+      setSolBalance(result.solBalance);
+      setTokenBalances(result.tokenBalances);
+      setTotalBalance(result.totalBalance);
+    } catch (error) {
+      console.error('Error fetching balances:', error);
+      setSolBalance(null);
+      setTokenBalances([]);
+      setTotalBalance(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [connected, publicKey, tokens, tokenPrices, balanceService]);
+
+  const refetchBalances = useCallback(async () => {
+    await fetchBalances();
+  }, [fetchBalances]);
+
+  useEffect(() => {
+    fetchBalances();
+  }, [fetchBalances]);
+
+  const contextValue: BalanceContextType = {
+    tokenPrices,
+    solBalance,
+    tokenBalances,
+    loading,
+    totalBalance,
+    refetchBalances,
+  };
+
+  return (
+    <BalanceContext.Provider value={contextValue}>
+      {children}
+    </BalanceContext.Provider>
+  );
+};
 
 // Hook factory for creating balance service
 export function createBalanceService(rpcUrl?: string): BalanceService {
