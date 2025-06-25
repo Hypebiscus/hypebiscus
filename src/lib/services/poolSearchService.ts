@@ -1,4 +1,5 @@
 // src/lib/services/poolSearchService.ts
+// Updated interfaces and methods to fix TypeScript errors
 
 import { fetchPools } from '@/lib/api/pools';
 import { fetchMessage } from '@/lib/api/chat';
@@ -30,9 +31,11 @@ export interface PoolSearchResult {
   searchTerm: string;
 }
 
+// Updated interface to include tokenFilter
 export interface PoolSearchParams {
   style: string | null;
   shownPoolAddresses: string[];
+  tokenFilter?: string; // Added this property
   onLoadingMessage: (message: string) => void;
   onError: (error: unknown) => void;
   handleAsyncError: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>;
@@ -67,40 +70,40 @@ export class PoolSearchService {
   }
 
   /**
-   * Fetches pools for a specific search term
+   * Get search terms based on token filter
    */
-  private async fetchPoolsForTerm(
-    searchTerm: string,
-    handleAsyncError: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>
-  ): Promise<PoolSearchResult> {
-    try {
-      const poolsData = await handleAsyncError(
-        () => fetchPools(searchTerm),
-        `Fetching ${searchTerm} pools`
-      );
-
-      const pools: ApiPool[] = [];
-      
-      if (poolsData && poolsData.groups && poolsData.groups.length > 0) {
-        console.log(`Found ${poolsData.groups.length} groups for ${searchTerm}`);
-        
-        (poolsData.groups as Group[]).forEach((group) => {
-          if (group.pairs?.length > 0) {
-            const validPairs = this.filterValidPairs(group.pairs);
-            pools.push(...validPairs);
-          }
-        });
-      }
-      
-      return { pools, searchTerm };
-    } catch (error) {
-      console.error(`Error fetching pools for ${searchTerm}:`, error);
-      return { pools: [], searchTerm };
+  private getSearchTermsForFilter(tokenFilter?: string): string[] {
+    if (!tokenFilter || tokenFilter === 'btc') {
+      return this.config.searchTerms; // Return all search terms
+    }
+    
+    // Return specific term based on filter
+    switch (tokenFilter) {
+      case 'wbtc-sol':
+        return ['wbtc-sol', 'wbtc'];
+      case 'zbtc-sol':
+        return ['zbtc-sol', 'zbtc'];
+      case 'cbbtc-sol':
+        return ['cbbtc-sol', 'cbbtc'];
+      default:
+        return this.config.searchTerms;
     }
   }
 
   /**
-   * Filters pairs based on validation criteria
+   * Helper method to check if a pair is valid
+   */
+  private isValidPair(pair: ApiPool): boolean {
+    const name = pair.name.toLowerCase();
+    const binStep = pair.bin_step || 0;
+
+    return (name === "wbtc-sol" || name === "zbtc-sol" || name === "cbbtc-sol") &&
+           !name.includes("jito") &&
+           this.config.allowedBinSteps.includes(binStep);
+  }
+
+  /**
+   * Filters pairs based on validation criteria (original method)
    */
   private filterValidPairs(pairs: ApiPool[]): ApiPool[] {
     return pairs.filter((pair) => {
@@ -117,6 +120,71 @@ export class PoolSearchService {
       }
       return isValidPair;
     });
+  }
+
+  /**
+   * Filter pairs based on token filter
+   */
+  private filterPairsByToken(pairs: ApiPool[], tokenFilter?: string): ApiPool[] {
+    if (!tokenFilter || tokenFilter === 'btc') {
+      return this.filterValidPairs(pairs); // Use existing validation
+    }
+    
+    return pairs.filter((pair) => {
+      const name = pair.name.toLowerCase();
+      const binStep = pair.bin_step || 0;
+      
+      // Basic validation first
+      if (!this.config.allowedBinSteps.includes(binStep) || name.includes("jito")) {
+        return false;
+      }
+      
+      // Token-specific filtering
+      switch (tokenFilter) {
+        case 'wbtc-sol':
+          return name.includes('wbtc') && name.includes('sol');
+        case 'zbtc-sol':
+          return name.includes('zbtc') && name.includes('sol');
+        case 'cbbtc-sol':
+          return name.includes('cbbtc') && name.includes('sol');
+        default:
+          return this.isValidPair(pair);
+      }
+    });
+  }
+
+  /**
+   * Fetches pools for a specific search term
+   */
+  private async fetchPoolsForTerm(
+    searchTerm: string,
+    tokenFilter: string | undefined,
+    handleAsyncError: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>
+  ): Promise<PoolSearchResult> {
+    try {
+      const poolsData = await handleAsyncError(
+        () => fetchPools(searchTerm),
+        `Fetching ${searchTerm} pools`
+      );
+
+      const pools: ApiPool[] = [];
+      
+      if (poolsData && poolsData.groups && poolsData.groups.length > 0) {
+        console.log(`Found ${poolsData.groups.length} groups for ${searchTerm}`);
+        
+        (poolsData.groups as Group[]).forEach((group) => {
+          if (group.pairs?.length > 0) {
+            const validPairs = this.filterPairsByToken(group.pairs, tokenFilter);
+            pools.push(...validPairs);
+          }
+        });
+      }
+      
+      return { pools, searchTerm };
+    } catch (error) {
+      console.error(`Error fetching pools for ${searchTerm}:`, error);
+      return { pools: [], searchTerm };
+    }
   }
 
   /**
@@ -162,14 +230,16 @@ export class PoolSearchService {
    * Searches for pools using direct search terms
    */
   private async searchDirectTerms(
+    tokenFilter: string | undefined,
     handleAsyncError: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>
   ): Promise<ApiPool[]> {
     const allPools: ApiPool[] = [];
+    const searchTerms = this.getSearchTermsForFilter(tokenFilter);
     
-    console.log("Searching for specific BTC-SOL pairs with standard bin steps");
+    console.log(`Searching for ${tokenFilter || 'all'} BTC-SOL pairs with standard bin steps`);
     
-    for (const term of this.config.searchTerms) {
-      const result = await this.fetchPoolsForTerm(term, handleAsyncError);
+    for (const term of searchTerms) {
+      const result = await this.fetchPoolsForTerm(term, tokenFilter, handleAsyncError);
       const validPools = this.removeDuplicatePools(allPools, result.pools);
       allPools.push(...validPools);
     }
@@ -182,14 +252,18 @@ export class PoolSearchService {
    */
   private async searchBroaderTerms(
     existingPools: ApiPool[],
+    tokenFilter: string | undefined,
     handleAsyncError: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>
   ): Promise<ApiPool[]> {
     console.log(`Only found ${existingPools.length} pools with direct searches, trying broader search`);
     
     const additionalPools: ApiPool[] = [];
+    const broaderTerms = tokenFilter && tokenFilter !== 'btc' 
+      ? [tokenFilter.split('-')[0]] // e.g., 'wbtc-sol' -> ['wbtc']
+      : BROADER_SEARCH_TERMS;
     
-    for (const term of BROADER_SEARCH_TERMS) {
-      const result = await this.fetchPoolsForTerm(term, handleAsyncError);
+    for (const term of broaderTerms) {
+      const result = await this.fetchPoolsForTerm(term, tokenFilter, handleAsyncError);
       const validPools = this.removeDuplicatePools([...existingPools, ...additionalPools], result.pools);
       additionalPools.push(...validPools);
       
@@ -202,34 +276,43 @@ export class PoolSearchService {
   }
 
   /**
-   * Main pool search method
+   * Main pool search method with token filtering
    */
   public async searchPools(params: PoolSearchParams): Promise<ApiPool[]> {
-    const { onLoadingMessage, handleAsyncError } = params;
+    const { onLoadingMessage, handleAsyncError, tokenFilter } = params;
     
-    // Display loading message
+    // Display token-specific loading message
+    const filterLabels: Record<string, string> = {
+      'wbtc-sol': 'wBTC-SOL',
+      'zbtc-sol': 'zBTC-SOL',
+      'cbbtc-sol': 'cbBTC-SOL',
+      'btc': 'All BTC'
+    };
+    
+    const tokenLabel = tokenFilter ? filterLabels[tokenFilter] || tokenFilter : 'BTC';
+    
     onLoadingMessage(
       params.style
-        ? `Finding the best ${params.style} Solana liquidity pools for you...`
-        : "Finding the best Solana liquidity pools based on your request..."
+        ? `Finding the best ${params.style} ${tokenLabel} liquidity pools for you...`
+        : `Finding the best ${tokenLabel} liquidity pools based on your request...`
     );
 
     // Add deliberate delay to show loading state
-    await new Promise((resolve) => setTimeout(resolve, 3500));
+    await new Promise((resolve) => setTimeout(resolve, 2500));
 
-    // Step 1: Direct search
-    let allPools = await this.searchDirectTerms(handleAsyncError);
+    // Step 1: Direct search with token filtering
+    let allPools = await this.searchDirectTerms(tokenFilter, handleAsyncError);
     
     // Step 2: Broader search if needed
-    if (allPools.length < 6) {
-      const additionalPools = await this.searchBroaderTerms(allPools, handleAsyncError);
+    if (allPools.length < 3) { // Reduced threshold for token-specific searches
+      const additionalPools = await this.searchBroaderTerms(allPools, tokenFilter, handleAsyncError);
       allPools.push(...additionalPools);
     }
     
     // Step 3: Quality filtering
     allPools = this.filterPoolsByQuality(allPools);
     
-    console.log(`Total pools found after all searches and filtering: ${allPools.length}`);
+    console.log(`Total ${tokenLabel} pools found after filtering: ${allPools.length}`);
     console.log("Pool bin steps found:", allPools.map((p) => `${p.name}: ${p.bin_step}`).join(", "));
     
     return allPools;
@@ -283,14 +366,24 @@ export class PoolSearchService {
   }
 
   /**
-   * Generates no pools found message
+   * Updated no pools found message with token-specific context
    */
-  public getNoPoolsFoundMessage(): string {
-    return `I searched specifically for zBTC, wBTC, and cbBTC liquidity pools paired with SOL on Solana but couldn't find any matching pools at the moment. This could be due to:
+  public getNoPoolsFoundMessage(tokenFilter?: string): string {
+    const filterLabels: Record<string, string> = {
+      'wbtc-sol': 'wBTC-SOL',
+      'zbtc-sol': 'zBTC-SOL', 
+      'cbbtc-sol': 'cbBTC-SOL',
+      'btc': 'BTC'
+    };
+    
+    const tokenLabel = tokenFilter ? filterLabels[tokenFilter] || tokenFilter : 'BTC';
+    
+    return `I searched specifically for ${tokenLabel} liquidity pools paired with SOL on Solana but couldn't find any matching pools at the moment. This could be due to:
     1. API limitations or temporary unavailability
-    2. These specific pools might not be indexed by our data provider
+    2. These specific ${tokenLabel} pools might not be indexed by our data provider
     3. The pools might exist but with different naming conventions
-    You could try again in a few moments.`;
+    
+    Try selecting a different Bitcoin token filter or check back in a few moments.`;
   }
 }
 

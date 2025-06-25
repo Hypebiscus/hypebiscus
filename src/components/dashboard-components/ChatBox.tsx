@@ -11,6 +11,8 @@ import {
   ArrowClockwise,
 } from "@phosphor-icons/react";
 import BtcPoolsList from "./BtcPoolsList";
+import BtcFilterDropdown from "./BtcFilterDropdown";
+import BtcFilterModal from "./BtcFilterModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import QuickActionButtons from "./QuickActionButtons";
 import PortfolioStyleModal from "./PortfolioStyleModal";
@@ -45,8 +47,10 @@ const ChatBox: React.FC = () => {
   const [selectedPool, setSelectedPool] = useState<FormattedPool | null>(null);
   const [isAddLiquidityModalOpen, setIsAddLiquidityModalOpen] = useState(false);
   const [isPortfolioStyleModalOpen, setIsPortfolioStyleModalOpen] = useState(false);
+  const [isBtcFilterModalOpen, setIsBtcFilterModalOpen] = useState(false);
   const [selectedPortfolioStyle, setSelectedPortfolioStyle] = useState<string | null>(null);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
+  const [activeTokenFilter, setActiveTokenFilter] = useState<string>('');
   
   // Pool tracking states
   const [shownPoolAddresses, setShownPoolAddresses] = useState<string[]>([]);
@@ -284,6 +288,114 @@ const ChatBox: React.FC = () => {
     await handleStreamingResponse(messageHistory);
   }, [messages, handleStreamingResponse]);
 
+  // Handle token filter search
+  const handleTokenFilterSearch = useCallback(async (tokenFilter: string) => {
+    setActiveTokenFilter(tokenFilter);
+    
+    // Clear previous messages about filters
+    setMessages(prev => prev.filter(msg => 
+      !msg.content.includes('Filtering by') && 
+      !msg.content.includes('Showing pools for')
+    ));
+    
+    // Add user message indicating filter selection
+    const filterLabels: Record<string, string> = {
+      'wbtc-sol': 'wBTC-SOL',
+      'zbtc-sol': 'zBTC-SOL', 
+      'cbbtc-sol': 'cbBTC-SOL',
+      'btc': 'All BTC'
+    };
+    
+    const filterMessage = `Show me ${filterLabels[tokenFilter] || tokenFilter} pools`;
+    addMessage("user", filterMessage);
+    
+    // Set loading states
+    setIsLoading(true);
+    setIsPoolLoading(true);
+
+    try {
+      // Use the pool search service with token-specific filtering
+      const filteredPools = await poolSearchService.searchPools({
+        style: selectedPortfolioStyle,
+        shownPoolAddresses: [], // Reset shown pools for new filter
+        tokenFilter, // Pass the token filter
+        onLoadingMessage: (message) => addMessage("assistant", message),
+        onError: addErrorMessage,
+        handleAsyncError
+      });
+
+      if (filteredPools.length === 0) {
+        addMessage("assistant", `No ${filterLabels[tokenFilter] || tokenFilter} pools found that match your criteria. Try adjusting your portfolio style or check back later.`);
+        return;
+      }
+
+      // Get the best pool for the selected style and token filter
+      const selectedPool = poolSearchService.getBestPool(
+        filteredPools, 
+        selectedPortfolioStyle, 
+        []
+      );
+
+      if (selectedPool) {
+        // Reset shown pool addresses for new filter
+        setShownPoolAddresses([selectedPool.address]);
+
+        // Process the selected pool with AI analysis
+        addMessage("assistant", "", []);
+        setStreamingMessage("");
+        setIsStreaming(true);
+
+        await poolSearchService.processSelectedPool({
+          selectedPool,
+          style: selectedPortfolioStyle,
+          onStreamingUpdate: (chunk) => {
+            setStreamingMessage(prev => (prev || "") + chunk);
+          },
+          onComplete: (analysis, formattedPool) => {
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1].content = analysis;
+              return newMessages;
+            });
+            
+            setMessageWithPools(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                message: { ...newMessages[newMessages.length - 1].message, content: analysis },
+                pools: [formattedPool]
+              };
+              return newMessages;
+            });
+            
+            setStreamingMessage(null);
+            setIsStreaming(false);
+          },
+          onError: () => {
+            setStreamingMessage(null);
+            setIsStreaming(false);
+            addErrorMessage(new Error('Failed to analyze pool'));
+          }
+        });
+
+        // Clean up loading messages
+        cleanupLoadingMessages(selectedPortfolioStyle);
+      }
+    } catch (error) {
+      console.error("Error in token filter search:", error);
+      addErrorMessage(error);
+    } finally {
+      setIsLoading(false);
+      setIsPoolLoading(false);
+    }
+  }, [
+    selectedPortfolioStyle,
+    poolSearchService,
+    addMessage,
+    addErrorMessage,
+    handleAsyncError,
+    cleanupLoadingMessages
+  ]);
+
   /**
    * Refactored showBestYieldPool using the new service
    */
@@ -296,6 +408,7 @@ const ChatBox: React.FC = () => {
         const allPools = await poolSearchService.searchPools({
           style,
           shownPoolAddresses,
+          tokenFilter: activeTokenFilter || undefined, // Include active token filter
           onLoadingMessage: (message) => addMessage("assistant", message),
           onError: addErrorMessage,
           handleAsyncError
@@ -303,7 +416,7 @@ const ChatBox: React.FC = () => {
 
         // Handle no pools found
         if (allPools.length === 0) {
-          addMessage("assistant", poolSearchService.getNoPoolsFoundMessage());
+          addMessage("assistant", poolSearchService.getNoPoolsFoundMessage(activeTokenFilter || undefined));
           return;
         }
 
@@ -389,7 +502,7 @@ const ChatBox: React.FC = () => {
         } else {
           addMessage(
             "assistant",
-            `I couldn't find any ${style} pools that match your criteria at the moment. Please try again later or adjust your preferences.`
+            `I couldn't find any ${style || 'recommended'} pools that match your criteria at the moment. Please try again later or adjust your preferences.`
           );
         }
 
@@ -406,6 +519,7 @@ const ChatBox: React.FC = () => {
       handleAsyncError,
       addErrorMessage,
       shownPoolAddresses,
+      activeTokenFilter,
       cleanupLoadingMessages
     ]
   );
@@ -479,72 +593,94 @@ const ChatBox: React.FC = () => {
 
   const handleSelectPortfolioStyle = async (style: string) => {
     setSelectedPortfolioStyle(style);
-
-    try {
-      if (!showWelcomeScreen) {
-        addMessage("assistant", "", undefined);
-      } else {
-        setShowWelcomeScreen(false);
-        addMessage("assistant", "", undefined);
-      }
-
-      setStreamingMessage("");
-      setIsStreaming(true);
-      
-      const welcomeMessage = await fetchMessage(
-        [{ 
-          role: "user", 
-          content: `I've selected the ${style} portfolio style. Please provide a well-structured welcome message explaining what this means for my liquidity pool recommendations. Format it with clear bullet points for the key characteristics of this portfolio style and end with a brief question about what I'm interested in learning more about.` 
-        }],
-        undefined,
-        style,
-        (chunk) => {
-          setStreamingMessage(prev => (prev || "") + chunk);
-        }
-      );
-
-      setMessages(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1].content = welcomeMessage;
-        return newMessages;
-      });
-      
-      setMessageWithPools(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1].message.content = welcomeMessage;
-        return newMessages;
-      });
-      
-      setStreamingMessage(null);
-      setIsStreaming(false);
-
-      showBestYieldPool(style);
-    } catch (error) {
-      console.error("Error generating welcome message:", error);
-      
-      setStreamingMessage(null);
-      setIsStreaming(false);
-      
-      if (!showWelcomeScreen) {
-        addMessage(
-          "assistant",
-          `You've selected the ${
-            style.charAt(0).toUpperCase() + style.slice(1)
-          } portfolio style. I'll recommend pools that match your risk preference.`
-        );
-      } else {
-        setShowWelcomeScreen(false);
-        addMessage(
-          "assistant",
-          `Welcome! You've selected the ${
-            style.charAt(0).toUpperCase() + style.slice(1)
-          } portfolio style. I'll recommend pools that match your risk preference.`
-        );
-      }
-      
-      showBestYieldPool(style);
-    }
+    
+    // Close portfolio style modal and open BTC filter modal
+    setIsPortfolioStyleModalOpen(false);
+    setIsBtcFilterModalOpen(true);
   };
+
+  const handleSelectBtcFilter = async (filter: string) => {
+  setActiveTokenFilter(filter);
+  setIsBtcFilterModalOpen(false);
+
+  // Define filter labels inside the function
+  const filterLabels: Record<string, string> = {
+    'wbtc-sol': 'wBTC-SOL',
+    'zbtc-sol': 'zBTC-SOL',
+    'cbbtc-sol': 'cbBTC-SOL',
+    'btc': 'All BTC'
+  };
+
+  try {
+    if (!showWelcomeScreen) {
+      addMessage("assistant", "", undefined);
+    } else {
+      setShowWelcomeScreen(false);
+      addMessage("assistant", "", undefined);
+    }
+
+    setStreamingMessage("");
+    setIsStreaming(true);
+    
+    // Generate portfolio + filter specific welcome message
+    const portfolioStyle = selectedPortfolioStyle || 'conservative'; // Fix: provide fallback
+    const welcomeMessage = await fetchMessage(
+      [{ 
+        role: "user", 
+        content: `I've selected the ${portfolioStyle} portfolio style and want to focus on ${filterLabels[filter] || filter} pools. Please provide a well-structured welcome message explaining what this combination means for my liquidity pool recommendations. Include key characteristics of this portfolio style as it applies to ${filterLabels[filter] || filter} pools specifically.` 
+      }],
+      undefined,
+      portfolioStyle, // Use the fallback variable
+      (chunk) => {
+        setStreamingMessage(prev => (prev || "") + chunk);
+      }
+    );
+
+    setMessages(prev => {
+      const newMessages = [...prev];
+      newMessages[newMessages.length - 1].content = welcomeMessage;
+      return newMessages;
+    });
+    
+    setMessageWithPools(prev => {
+      const newMessages = [...prev];
+      newMessages[newMessages.length - 1].message.content = welcomeMessage;
+      return newMessages;
+    });
+    
+    setStreamingMessage(null);
+    setIsStreaming(false);
+
+    // Start searching for pools with the selected filter
+    await handleTokenFilterSearch(filter);
+    
+  } catch (error) {
+    console.error("Error generating welcome message:", error);
+    
+    setStreamingMessage(null);
+    setIsStreaming(false);
+    
+    // Fix: Use safe string manipulation with fallbacks
+    const portfolioStyleFormatted = selectedPortfolioStyle 
+      ? selectedPortfolioStyle.charAt(0).toUpperCase() + selectedPortfolioStyle.slice(1)
+      : 'Conservative';
+    
+    if (!showWelcomeScreen) {
+      addMessage(
+        "assistant",
+        `You've selected the ${portfolioStyleFormatted} portfolio style focusing on ${filterLabels[filter] || filter} pools. I'll recommend pools that match your preferences.`
+      );
+    } else {
+      setShowWelcomeScreen(false);
+      addMessage(
+        "assistant",
+        `Welcome! You've selected the ${portfolioStyleFormatted} portfolio style with ${filterLabels[filter] || filter} focus. I'll recommend pools that match your preferences.`
+      );
+    }
+    
+    await handleTokenFilterSearch(filter);
+  }
+};
 
   const handleRefreshPools = useCallback(async () => {
     if (!selectedPortfolioStyle) {
@@ -578,7 +714,7 @@ const ChatBox: React.FC = () => {
     }
   }, [messages, showWelcomeScreen]);
 
-  // Split AI response function (unchanged)
+  // Split AI response function
   const splitAIResponse = (response: string): { part1: string, part2: string } => {
     if (!response) return { part1: "", part2: "" };
     
@@ -704,6 +840,8 @@ const ChatBox: React.FC = () => {
               </p>
             </div>
           </div>
+          
+          {/* Portfolio Style Selection - Only this button */}
           <Button
             variant="outline"
             size="secondary"
@@ -728,10 +866,18 @@ const ChatBox: React.FC = () => {
           isLoading={isLoading}
         />
 
+        {/* Portfolio Style Modal */}
         <PortfolioStyleModal
           isOpen={isPortfolioStyleModalOpen}
           onClose={() => setIsPortfolioStyleModalOpen(false)}
           onSelectStyle={handleSelectPortfolioStyle}
+        />
+        
+        {/* BTC Filter Modal */}
+        <BtcFilterModal
+          isOpen={isBtcFilterModalOpen}
+          onClose={() => setIsBtcFilterModalOpen(false)}
+          onSelectFilter={handleSelectBtcFilter}
         />
       </div>
     );
@@ -739,39 +885,51 @@ const ChatBox: React.FC = () => {
 
   return (
     <div className="flex flex-col h-[calc(100vh-100px)] lg:max-w-4xl mx-auto">
-      <div className="flex justify-end lg:mb-10 mb-4 gap-2">
-        {selectedPortfolioStyle && (
+      <div className="flex justify-between items-center lg:mb-10 mb-4 gap-4">
+        {/* Left side - BTC Filter Dropdown */}
+        <div className="flex-shrink-0">
+          <BtcFilterDropdown
+            onFilterSelect={handleTokenFilterSearch}
+            isLoading={isLoading || isPoolLoading}
+            activeFilter={activeTokenFilter}
+          />
+        </div>
+        
+        {/* Right side - Portfolio and Refresh buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {selectedPortfolioStyle && (
+            <Button
+              variant="secondary"
+              size="secondary"
+              className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20"
+              onClick={handleRefreshPools}
+              disabled={isPoolLoading}
+              title="Find different BTC pools with your current portfolio style"
+            >
+              <ArrowClockwise
+                size={16}
+                className={isPoolLoading ? "animate-spin" : ""}
+              />
+              {isPoolLoading ? <span className="lg:inline hidden">Finding...</span> : <span className="lg:inline hidden">Refresh Pools</span>}
+            </Button>
+          )}
+
           <Button
             variant="secondary"
             size="secondary"
-            className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20"
-            onClick={handleRefreshPools}
-            disabled={isPoolLoading}
-            title="Find different BTC pools with your current portfolio style"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2"
+            onClick={() => setIsPortfolioStyleModalOpen(true)}
           >
-            <ArrowClockwise
-              size={16}
-              className={isPoolLoading ? "animate-spin" : ""}
-            />
-            {isPoolLoading ? <span className="lg:inline hidden">Finding...</span> : <span className="lg:inline hidden">Refresh Pools</span>}
+            <span>
+              {selectedPortfolioStyle
+                ? `Portfolio: ${
+                    selectedPortfolioStyle.charAt(0).toUpperCase() +
+                    selectedPortfolioStyle.slice(1)
+                  }`
+                : "Select Portfolio Style"}
+            </span>
           </Button>
-        )}
-
-        <Button
-          variant="secondary"
-          size="secondary"
-          className="bg-secondary/30 border-primary text-white flex items-center gap-2"
-          onClick={() => setIsPortfolioStyleModalOpen(true)}
-        >
-          <span>
-            {selectedPortfolioStyle
-              ? `Portfolio: ${
-                  selectedPortfolioStyle.charAt(0).toUpperCase() +
-                  selectedPortfolioStyle.slice(1)
-                }`
-              : "Select Portfolio Style"}
-          </span>
-        </Button>
+        </div>
       </div>
 
       {/* Scrollable chat messages area */}
@@ -891,6 +1049,13 @@ const ChatBox: React.FC = () => {
         isOpen={isPortfolioStyleModalOpen}
         onClose={() => setIsPortfolioStyleModalOpen(false)}
         onSelectStyle={handleSelectPortfolioStyle}
+      />
+
+      {/* BTC Filter Modal */}
+      <BtcFilterModal
+        isOpen={isBtcFilterModalOpen}
+        onClose={() => setIsBtcFilterModalOpen(false)}
+        onSelectFilter={handleSelectBtcFilter}
       />
     </div>
   );
