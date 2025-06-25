@@ -1,5 +1,6 @@
-import { BalanceContext } from '@/context/BalanceProvider';
+// src/hooks/useBalanceContext.tsx
 import { useContext } from 'react';
+import { BalanceContext } from '@/context/BalanceProvider';
 
 export const useBalanceContext = () => {
   const context = useContext(BalanceContext);
