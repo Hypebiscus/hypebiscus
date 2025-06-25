@@ -1,7 +1,7 @@
 // src/components/dashboard-components/ChatBox.tsx
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   ChartLine,
@@ -70,8 +70,8 @@ const ChatBox: React.FC = () => {
   const { handleError, handleAsyncError } = useErrorHandler();
   const { service: poolSearchService } = usePoolSearchService();
 
-  // Intent detection patterns
-  const MESSAGE_PATTERNS = {
+  // Intent detection patterns - moved to useMemo to avoid dependency warnings
+  const MESSAGE_PATTERNS = useMemo(() => ({
     educational: [
       /what is.*(?:pool|lp|liquidity)/i,
       /how does.*work/i,
@@ -100,7 +100,7 @@ const ChatBox: React.FC = () => {
       /other options/i,
       /alternatives/i,
     ],
-  };
+  }), []);
 
   // Core message management
   const addMessage = useCallback(
@@ -179,7 +179,7 @@ const ChatBox: React.FC = () => {
       isAlternativeRequest,
       isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest
     };
-  }, []);
+  }, [MESSAGE_PATTERNS]);
 
   // Streaming response handler
   const handleStreamingResponse = useCallback(async (
@@ -239,166 +239,7 @@ const ChatBox: React.FC = () => {
     await handleStreamingResponse(messageHistory);
   }, [messages, handleStreamingResponse]);
 
-  // Handle alternative pool requests
-  const handleAlternativePoolRequest = useCallback(async () => {
-    console.log("User is asking for another pool");
-    
-    setDifferentPoolRequests((prev) => prev + 1);
-
-    const shownBinStepsForStyle =
-      shownBinStepsPerStyle[selectedPortfolioStyle || "conservative"] || [];
-    const preferredBinSteps = getPreferredBinSteps(selectedPortfolioStyle || "conservative");
-
-    const allPreferredBinStepsShown = preferredBinSteps.every((step) =>
-      shownBinStepsForStyle.includes(step)
-    );
-
-    if (allPreferredBinStepsShown) {
-      console.log("All preferred bin steps have been shown, resetting tracking to show them again");
-      setShownBinStepsPerStyle((prev) => ({
-        ...prev,
-        [selectedPortfolioStyle || "conservative"]: [],
-      }));
-    }
-
-    await showBestYieldPool(selectedPortfolioStyle || "conservative");
-  }, [
-    selectedPortfolioStyle,
-    shownBinStepsPerStyle,
-    setDifferentPoolRequests,
-    setShownBinStepsPerStyle
-  ]);
-
-  // Handle general pool requests
-  const handlePoolRequest = useCallback(async () => {
-    await showBestYieldPool(selectedPortfolioStyle || null);
-  }, [selectedPortfolioStyle]);
-
-  // Handle general chat
-  const handleGeneralChat = useCallback(async (userMessage: string) => {
-    const messageHistory = [
-      ...messages,
-      {
-        role: "user" as const,
-        content: userMessage,
-        timestamp: new Date(),
-      },
-    ];
-
-    await handleStreamingResponse(messageHistory);
-  }, [messages, handleStreamingResponse]);
-
-  // Handle token filter search
-  const handleTokenFilterSearch = useCallback(async (tokenFilter: string) => {
-    setActiveTokenFilter(tokenFilter);
-    
-    // Clear previous messages about filters
-    setMessages(prev => prev.filter(msg => 
-      !msg.content.includes('Filtering by') && 
-      !msg.content.includes('Showing pools for')
-    ));
-    
-    // Add user message indicating filter selection
-    const filterLabels: Record<string, string> = {
-      'wbtc-sol': 'wBTC-SOL',
-      'zbtc-sol': 'zBTC-SOL', 
-      'cbbtc-sol': 'cbBTC-SOL',
-      'btc': 'All BTC'
-    };
-    
-    const filterMessage = `Show me ${filterLabels[tokenFilter] || tokenFilter} pools`;
-    addMessage("user", filterMessage);
-    
-    // Set loading states
-    setIsLoading(true);
-    setIsPoolLoading(true);
-
-    try {
-      // Use the pool search service with token-specific filtering
-      const filteredPools = await poolSearchService.searchPools({
-        style: selectedPortfolioStyle,
-        shownPoolAddresses: [], // Reset shown pools for new filter
-        tokenFilter, // Pass the token filter
-        onLoadingMessage: (message) => addMessage("assistant", message),
-        onError: addErrorMessage,
-        handleAsyncError
-      });
-
-      if (filteredPools.length === 0) {
-        addMessage("assistant", `No ${filterLabels[tokenFilter] || tokenFilter} pools found that match your criteria. Try adjusting your portfolio style or check back later.`);
-        return;
-      }
-
-      // Get the best pool for the selected style and token filter
-      const selectedPool = poolSearchService.getBestPool(
-        filteredPools, 
-        selectedPortfolioStyle, 
-        []
-      );
-
-      if (selectedPool) {
-        // Reset shown pool addresses for new filter
-        setShownPoolAddresses([selectedPool.address]);
-
-        // Process the selected pool with AI analysis
-        addMessage("assistant", "", []);
-        setStreamingMessage("");
-        setIsStreaming(true);
-
-        await poolSearchService.processSelectedPool({
-          selectedPool,
-          style: selectedPortfolioStyle,
-          onStreamingUpdate: (chunk) => {
-            setStreamingMessage(prev => (prev || "") + chunk);
-          },
-          onComplete: (analysis, formattedPool) => {
-            setMessages(prev => {
-              const newMessages = [...prev];
-              newMessages[newMessages.length - 1].content = analysis;
-              return newMessages;
-            });
-            
-            setMessageWithPools(prev => {
-              const newMessages = [...prev];
-              newMessages[newMessages.length - 1] = {
-                message: { ...newMessages[newMessages.length - 1].message, content: analysis },
-                pools: [formattedPool]
-              };
-              return newMessages;
-            });
-            
-            setStreamingMessage(null);
-            setIsStreaming(false);
-          },
-          onError: () => {
-            setStreamingMessage(null);
-            setIsStreaming(false);
-            addErrorMessage(new Error('Failed to analyze pool'));
-          }
-        });
-
-        // Clean up loading messages
-        cleanupLoadingMessages(selectedPortfolioStyle);
-      }
-    } catch (error) {
-      console.error("Error in token filter search:", error);
-      addErrorMessage(error);
-    } finally {
-      setIsLoading(false);
-      setIsPoolLoading(false);
-    }
-  }, [
-    selectedPortfolioStyle,
-    poolSearchService,
-    addMessage,
-    addErrorMessage,
-    handleAsyncError,
-    cleanupLoadingMessages
-  ]);
-
-  /**
-   * Refactored showBestYieldPool using the new service
-   */
+  // Declare showBestYieldPool before it's used
   const showBestYieldPool = useCallback(
     async (style: string | null) => {
       setIsPoolLoading(true);
@@ -523,6 +364,164 @@ const ChatBox: React.FC = () => {
       cleanupLoadingMessages
     ]
   );
+
+  // Handle alternative pool requests
+  const handleAlternativePoolRequest = useCallback(async () => {
+    console.log("User is asking for another pool");
+    
+    setDifferentPoolRequests((prev) => prev + 1);
+
+    const shownBinStepsForStyle =
+      shownBinStepsPerStyle[selectedPortfolioStyle || "conservative"] || [];
+    const preferredBinSteps = getPreferredBinSteps(selectedPortfolioStyle || "conservative");
+
+    const allPreferredBinStepsShown = preferredBinSteps.every((step) =>
+      shownBinStepsForStyle.includes(step)
+    );
+
+    if (allPreferredBinStepsShown) {
+      console.log("All preferred bin steps have been shown, resetting tracking to show them again");
+      setShownBinStepsPerStyle((prev) => ({
+        ...prev,
+        [selectedPortfolioStyle || "conservative"]: [],
+      }));
+    }
+
+    await showBestYieldPool(selectedPortfolioStyle || "conservative");
+  }, [
+    selectedPortfolioStyle,
+    shownBinStepsPerStyle,
+    setDifferentPoolRequests,
+    setShownBinStepsPerStyle,
+    showBestYieldPool
+  ]);
+
+  // Handle general pool requests
+  const handlePoolRequest = useCallback(async () => {
+    await showBestYieldPool(selectedPortfolioStyle || null);
+  }, [selectedPortfolioStyle, showBestYieldPool]);
+
+  // Handle general chat
+  const handleGeneralChat = useCallback(async (userMessage: string) => {
+    const messageHistory = [
+      ...messages,
+      {
+        role: "user" as const,
+        content: userMessage,
+        timestamp: new Date(),
+      },
+    ];
+
+    await handleStreamingResponse(messageHistory);
+  }, [messages, handleStreamingResponse]);
+
+  // Handle token filter search
+  const handleTokenFilterSearch = useCallback(async (tokenFilter: string) => {
+    setActiveTokenFilter(tokenFilter);
+    
+    // Clear previous messages about filters
+    setMessages(prev => prev.filter(msg => 
+      !msg.content.includes('Filtering by') && 
+      !msg.content.includes('Showing pools for')
+    ));
+    
+    // Add user message indicating filter selection
+    const filterLabels: Record<string, string> = {
+      'wbtc-sol': 'wBTC-SOL',
+      'zbtc-sol': 'zBTC-SOL', 
+      'cbbtc-sol': 'cbBTC-SOL',
+      'btc': 'All BTC'
+    };
+    
+    const filterMessage = `Show me ${filterLabels[tokenFilter] || tokenFilter} pools`;
+    addMessage("user", filterMessage);
+    
+    // Set loading states
+    setIsLoading(true);
+    setIsPoolLoading(true);
+
+    try {
+      // Use the pool search service with token-specific filtering
+      const filteredPools = await poolSearchService.searchPools({
+        style: selectedPortfolioStyle,
+        shownPoolAddresses: [], // Reset shown pools for new filter
+        tokenFilter, // Pass the token filter
+        onLoadingMessage: (message) => addMessage("assistant", message),
+        onError: addErrorMessage,
+        handleAsyncError
+      });
+
+      if (filteredPools.length === 0) {
+        addMessage("assistant", `No ${filterLabels[tokenFilter] || tokenFilter} pools found that match your criteria. Try adjusting your portfolio style or check back later.`);
+        return;
+      }
+
+      // Get the best pool for the selected style and token filter
+      const selectedPool = poolSearchService.getBestPool(
+        filteredPools, 
+        selectedPortfolioStyle, 
+        []
+      );
+
+      if (selectedPool) {
+        // Reset shown pool addresses for new filter
+        setShownPoolAddresses([selectedPool.address]);
+
+        // Process the selected pool with AI analysis
+        addMessage("assistant", "", []);
+        setStreamingMessage("");
+        setIsStreaming(true);
+
+        await poolSearchService.processSelectedPool({
+          selectedPool,
+          style: selectedPortfolioStyle,
+          onStreamingUpdate: (chunk) => {
+            setStreamingMessage(prev => (prev || "") + chunk);
+          },
+          onComplete: (analysis, formattedPool) => {
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1].content = analysis;
+              return newMessages;
+            });
+            
+            setMessageWithPools(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                message: { ...newMessages[newMessages.length - 1].message, content: analysis },
+                pools: [formattedPool]
+              };
+              return newMessages;
+            });
+            
+            setStreamingMessage(null);
+            setIsStreaming(false);
+          },
+          onError: () => {
+            setStreamingMessage(null);
+            setIsStreaming(false);
+            addErrorMessage(new Error('Failed to analyze pool'));
+          }
+        });
+
+        // Clean up loading messages
+        cleanupLoadingMessages(selectedPortfolioStyle);
+      }
+    } catch (error) {
+      console.error("Error in token filter search:", error);
+      addErrorMessage(error);
+    } finally {
+      setIsLoading(false);
+      setIsPoolLoading(false);
+    }
+  }, [
+    selectedPortfolioStyle,
+    poolSearchService,
+    addMessage,
+    addErrorMessage,
+    handleAsyncError,
+    cleanupLoadingMessages
+  ]);
 
   // Main refactored handleSendMessage function
   const handleSendMessage = useCallback(

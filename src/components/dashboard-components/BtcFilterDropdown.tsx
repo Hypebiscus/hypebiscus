@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Bitcoin, Search } from "lucide-react";
+import { ChevronDown, Bitcoin } from "lucide-react";
 
 interface BtcFilterDropdownProps {
   onFilterSelect: (filter: string) => void;
