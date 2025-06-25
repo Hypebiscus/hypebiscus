@@ -66,6 +66,38 @@ const ChatBox: React.FC = () => {
   const { handleError, handleAsyncError } = useErrorHandler();
   const { service: poolSearchService } = usePoolSearchService();
 
+  // Intent detection patterns
+  const MESSAGE_PATTERNS = {
+    educational: [
+      /what is.*(?:pool|lp|liquidity)/i,
+      /how does.*work/i,
+      /why solana/i,
+      /what are the risks/i,
+    ],
+    poolRequest: [
+      /(?:find|show|get).*(?:pool|liquidity)/i,
+      /recommend/i,
+      /best.*pool/i,
+      /highest.*yield/i,
+      /best.*yield/i,
+      /best.*liquidity/i,
+      /high.*tvl/i,
+      /invest.*where/i,
+      /which.*pool/i,
+      /btc.*pool/i,
+      /bitcoin.*pool/i,
+      /lp.*opportunities/i,
+      /liquidity.*provision.*options/i,
+    ],
+    alternativeRequest: [
+      /another/i,
+      /different/i,
+      /show.*more/i,
+      /other options/i,
+      /alternatives/i,
+    ],
+  };
+
   // Core message management
   const addMessage = useCallback(
     (role: MessageRole, content: string, pools?: FormattedPool[]) => {
@@ -117,6 +149,140 @@ const ChatBox: React.FC = () => {
       );
     });
   }, []);
+
+  // Intent analysis function
+  const analyzeMessageIntent = useCallback((message: string) => {
+    const lowerMessage = message.toLowerCase();
+    
+    // Check for educational queries
+    const isEducational = MESSAGE_PATTERNS.educational.some(pattern => 
+      pattern.test(lowerMessage)
+    );
+    
+    // Check for pool requests
+    const isPoolRequest = MESSAGE_PATTERNS.poolRequest.some(pattern =>
+      pattern.test(lowerMessage)
+    );
+    
+    // Check for alternative pool requests
+    const isAlternativeRequest = MESSAGE_PATTERNS.alternativeRequest.some(pattern =>
+      pattern.test(lowerMessage)
+    );
+    
+    return {
+      isEducational,
+      isPoolRequest,
+      isAlternativeRequest,
+      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest
+    };
+  }, []);
+
+  // Streaming response handler
+  const handleStreamingResponse = useCallback(async (
+    messageHistory: Message[],
+    poolData?: FormattedPool,
+    portfolioStyle?: string
+  ) => {
+    addMessage("assistant", "", undefined);
+    setStreamingMessage("");
+    setIsStreaming(true);
+
+    try {
+      const response = await fetchMessage(
+        messageHistory,
+        poolData,
+        portfolioStyle,
+        (chunk) => {
+          setStreamingMessage(prev => (prev || "") + chunk);
+        }
+      );
+      
+      // Update the placeholder message with the full response
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].content = response;
+        return newMessages;
+      });
+      
+      setMessageWithPools(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].message.content = response;
+        return newMessages;
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('Streaming response error:', error);
+      addErrorMessage(error);
+      throw error;
+    } finally {
+      setStreamingMessage(null);
+      setIsStreaming(false);
+    }
+  }, [addMessage, addErrorMessage]);
+
+  // Handle educational queries
+  const handleEducationalQuery = useCallback(async (userMessage: string) => {
+    const messageHistory = [
+      ...messages,
+      {
+        role: "user" as const,
+        content: userMessage,
+        timestamp: new Date(),
+      },
+    ];
+
+    await handleStreamingResponse(messageHistory);
+  }, [messages, handleStreamingResponse]);
+
+  // Handle alternative pool requests
+  const handleAlternativePoolRequest = useCallback(async () => {
+    console.log("User is asking for another pool");
+    
+    setDifferentPoolRequests((prev) => prev + 1);
+
+    const shownBinStepsForStyle =
+      shownBinStepsPerStyle[selectedPortfolioStyle || "conservative"] || [];
+    const preferredBinSteps = getPreferredBinSteps(selectedPortfolioStyle || "conservative");
+
+    const allPreferredBinStepsShown = preferredBinSteps.every((step) =>
+      shownBinStepsForStyle.includes(step)
+    );
+
+    if (allPreferredBinStepsShown) {
+      console.log("All preferred bin steps have been shown, resetting tracking to show them again");
+      setShownBinStepsPerStyle((prev) => ({
+        ...prev,
+        [selectedPortfolioStyle || "conservative"]: [],
+      }));
+    }
+
+    await showBestYieldPool(selectedPortfolioStyle || "conservative");
+  }, [
+    selectedPortfolioStyle,
+    shownBinStepsPerStyle,
+    setDifferentPoolRequests,
+    setShownBinStepsPerStyle
+  ]);
+
+  // Handle general pool requests
+  const handlePoolRequest = useCallback(async () => {
+    await showBestYieldPool(selectedPortfolioStyle || null);
+  }, [selectedPortfolioStyle]);
+
+  // Handle general chat
+  const handleGeneralChat = useCallback(async (userMessage: string) => {
+    const messageHistory = [
+      ...messages,
+      {
+        role: "user" as const,
+        content: userMessage,
+        timestamp: new Date(),
+      },
+    ];
+
+    await handleStreamingResponse(messageHistory);
+  }, [messages, handleStreamingResponse]);
 
   /**
    * Refactored showBestYieldPool using the new service
@@ -244,166 +410,39 @@ const ChatBox: React.FC = () => {
     ]
   );
 
-  // Rest of the component methods remain the same...
+  // Main refactored handleSendMessage function
   const handleSendMessage = useCallback(
     async (message?: string) => {
       const messageToSend = message || inputMessage;
       if (!messageToSend.trim()) return;
 
+      // Add user message and clear input
       addMessage("user", messageToSend);
       const userMessage = messageToSend;
       setInputMessage("");
       setIsLoading(true);
 
+      // Small delay for UI responsiveness
       await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
-        const lowerCaseMessage = userMessage.toLowerCase();
-
-        const isEducationalPoolQuestion =
-          (lowerCaseMessage.includes("what is") &&
-            (lowerCaseMessage.includes("pool") ||
-              lowerCaseMessage.includes("lp") ||
-              lowerCaseMessage.includes("liquidity"))) ||
-          (lowerCaseMessage.includes("how does") &&
-            lowerCaseMessage.includes("work")) ||
-          lowerCaseMessage.includes("why solana") ||
-          lowerCaseMessage.includes("what are the risks");
-
-        const isAskingForAnotherPool =
-          lowerCaseMessage.includes("another") ||
-          lowerCaseMessage.includes("different") ||
-          (lowerCaseMessage.includes("show") &&
-            lowerCaseMessage.includes("more")) ||
-          lowerCaseMessage.includes("other options") ||
-          lowerCaseMessage.includes("alternatives");
-
-        if (isEducationalPoolQuestion) {
-          const messageHistory = [
-            ...messages,
-            {
-              role: "user" as const,
-              content: userMessage,
-              timestamp: new Date(),
-            },
-          ];
-
-          addMessage("assistant", "", undefined);
-          setStreamingMessage("");
-          setIsStreaming(true);
-
-          const response = await fetchMessage(
-            messageHistory, 
-            undefined, 
-            undefined,
-            (chunk) => {
-              setStreamingMessage(prev => (prev || "") + chunk);
-            }
-          );
-          
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].content = response;
-            return newMessages;
-          });
-          
-          setMessageWithPools(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].message.content = response;
-            return newMessages;
-          });
-          
-          setStreamingMessage(null);
-          setIsStreaming(false);
-        }
-        else if (isAskingForAnotherPool) {
-          console.log("User is asking for another pool");
-
-          setDifferentPoolRequests((prev) => prev + 1);
-
-          const shownBinStepsForStyle =
-            shownBinStepsPerStyle[selectedPortfolioStyle || "conservative"] ||
-            [];
-          const preferredBinSteps = getPreferredBinSteps(selectedPortfolioStyle || "conservative");
-
-          const allPreferredBinStepsShown = preferredBinSteps.every((step) =>
-            shownBinStepsForStyle.includes(step)
-          );
-
-          if (allPreferredBinStepsShown) {
-            console.log("All preferred bin steps have been shown, resetting tracking to show them again");
-            setShownBinStepsPerStyle((prev) => ({
-              ...prev,
-              [selectedPortfolioStyle || "conservative"]: [],
-            }));
-          }
-
-          await showBestYieldPool(selectedPortfolioStyle || "conservative");
-        }
-        else if (
-          ((lowerCaseMessage.includes("find") ||
-            lowerCaseMessage.includes("show") ||
-            lowerCaseMessage.includes("get")) &&
-            (lowerCaseMessage.includes("pool") ||
-              lowerCaseMessage.includes("liquidity"))) ||
-          lowerCaseMessage.includes("recommend") ||
-          lowerCaseMessage.match(/best\s+pool/i) ||
-          lowerCaseMessage.match(/highest\s+yield/i) ||
-          lowerCaseMessage.match(/best\s+yield/i) ||
-          lowerCaseMessage.match(/best\s+liquidity/i) ||
-          lowerCaseMessage.match(/high\s+tvl/i) ||
-          (lowerCaseMessage.includes("invest") &&
-            lowerCaseMessage.includes("where")) ||
-          (lowerCaseMessage.includes("which") &&
-            lowerCaseMessage.includes("pool")) ||
-          lowerCaseMessage.match(/btc\s+pool/i) ||
-          lowerCaseMessage.match(/bitcoin\s+pool/i) ||
-          lowerCaseMessage.match(/lp\s+opportunities/i) ||
-          lowerCaseMessage.match(/liquidity\s+provision\s+options/i)
-        ) {
-          console.log("Detected pool query:", lowerCaseMessage);
-          await showBestYieldPool(selectedPortfolioStyle || null);
+        // Analyze message intent
+        const intent = analyzeMessageIntent(userMessage);
+        
+        // Route to appropriate handler based on intent
+        if (intent.isEducational) {
+          await handleEducationalQuery(userMessage);
+        } else if (intent.isAlternativeRequest) {
+          await handleAlternativePoolRequest();
+        } else if (intent.isPoolRequest) {
+          await handlePoolRequest();
         } else {
-          const messageHistory = [
-            ...messages,
-            {
-              role: "user" as const,
-              content: userMessage,
-              timestamp: new Date(),
-            },
-          ];
-
-          addMessage("assistant", "", undefined);
-          setStreamingMessage("");
-          setIsStreaming(true);
-
-          const response = await fetchMessage(
-            messageHistory, 
-            undefined, 
-            undefined,
-            (chunk) => {
-              setStreamingMessage(prev => (prev || "") + chunk);
-            }
-          );
-          
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].content = response;
-            return newMessages;
-          });
-          
-          setMessageWithPools(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].message.content = response;
-            return newMessages;
-          });
-          
-          setStreamingMessage(null);
-          setIsStreaming(false);
+          await handleGeneralChat(userMessage);
         }
       } catch (error) {
         console.error("Error sending message:", error);
         addErrorMessage(error);
+        // Ensure streaming state is cleaned up on error
         setStreamingMessage(null);
         setIsStreaming(false);
       } finally {
@@ -412,12 +451,13 @@ const ChatBox: React.FC = () => {
     },
     [
       inputMessage,
-      messages,
-      selectedPortfolioStyle,
       addMessage,
-      addErrorMessage,
-      showBestYieldPool,
-      shownBinStepsPerStyle
+      analyzeMessageIntent,
+      handleEducationalQuery,
+      handleAlternativePoolRequest,
+      handlePoolRequest,
+      handleGeneralChat,
+      addErrorMessage
     ]
   );
 
