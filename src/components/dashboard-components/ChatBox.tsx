@@ -794,48 +794,46 @@ const ChatBox: React.FC = () => {
   // Render component
   if (showWelcomeScreen) {
     return (
-      <div className="flex flex-col h-[calc(100vh-100px)] w-full lg:max-w-4xl mx-auto">
-        <div className="flex-1 flex flex-col items-center justify-start p-6 lg:mt-14">
-          <h1 className="lg:text-3xl text-xl font-bold text-primary mb-2">
+      <div className="flex flex-col h-[calc(100vh-100px)] w-full max-w-4xl mx-auto px-4">
+        <div className="flex-1 flex flex-col items-center justify-start p-4 mt-8 overflow-y-auto">
+          <h1 className="text-2xl md:text-3xl font-bold text-primary mb-2 text-center">
             Welcome to Hypebiscus
           </h1>
-          <p className="text-white text-center font-medium max-w-md lg:mb-8 mb-4">
-            Your smart assistant for exploring BTC liquidity in the Solana DeFi
-            ecosystem.
+          <p className="text-white text-center font-medium max-w-md mb-6 text-sm md:text-base break-words">
+            Your smart assistant for exploring BTC liquidity in the Solana DeFi ecosystem.
           </p>
-          <div className="lg:grid grid-cols-1 max-w-2xl gap-4 mb-6">
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <Clock className="text-primary" size={20} />
+          
+          <div className="grid grid-cols-1 max-w-2xl gap-3 mb-6 w-full">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Clock className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
+              <p className="text-white text-sm break-words">
                 Real-time discovery of BTC and zBTC liquidity pools on Solana.
               </p>
             </div>
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <Plus className="text-primary" size={20} />
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Plus className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
+              <p className="text-white text-sm break-words">
                 Instant &apos;Add Position&apos; capability.
               </p>
             </div>
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <ChartLine className="text-primary" size={20} />
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <ChartLine className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
-                Live pool analytics, including TVL, APR, and recent liquidity
-                changes.
+              <p className="text-white text-sm break-words">
+                Live pool analytics, including TVL, APR, and recent liquidity changes.
               </p>
             </div>
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <Wallet className="text-primary" size={20} />
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Wallet className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
-                Secure, non-custodial wallet integration for direct on-chain
-                transactions.
+              <p className="text-white text-sm break-words">
+                Secure, non-custodial wallet integration for direct on-chain transactions.
               </p>
             </div>
           </div>
@@ -844,26 +842,28 @@ const ChatBox: React.FC = () => {
           <Button
             variant="outline"
             size="secondary"
-            className="bg-secondary/30 border-primary text-white flex items-center gap-2"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 w-full max-w-xs"
             onClick={() => setIsPortfolioStyleModalOpen(true)}
           >
-            <ChartLine size={20} />
+            <ChartLine size={18} />
             <span>Select Portfolio Style</span>
           </Button>
         </div>
 
-        <QuickActionButtons
-          onQuickAction={handleQuickAction}
-          disabled={isLoading}
-        />
-        <ChatInput
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={isLoading || isPoolLoading}
-          onSend={() => handleSendMessage()}
-          isLoading={isLoading}
-        />
+        <div className="flex-shrink-0 px-4 pb-4">
+          <QuickActionButtons
+            onQuickAction={handleQuickAction}
+            disabled={isLoading}
+          />
+          <ChatInput
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading || isPoolLoading}
+            onSend={() => handleSendMessage()}
+            isLoading={isLoading}
+          />
+        </div>
 
         {/* Portfolio Style Modal */}
         <PortfolioStyleModal
@@ -883,10 +883,10 @@ const ChatBox: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] lg:max-w-4xl mx-auto">
-      <div className="flex justify-between items-center lg:mb-10 mb-4 gap-4">
+    <div className="flex flex-col h-[calc(100vh-100px)] max-w-4xl mx-auto px-4">
+      <div className="flex justify-between items-center mb-6 gap-2 flex-wrap">
         {/* Left side - BTC Filter Dropdown */}
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 min-w-0">
           <BtcFilterDropdown
             onFilterSelect={handleTokenFilterSearch}
             isLoading={isLoading || isPoolLoading}
@@ -900,40 +900,46 @@ const ChatBox: React.FC = () => {
             <Button
               variant="secondary"
               size="secondary"
-              className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20"
+              className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20 text-xs"
               onClick={handleRefreshPools}
               disabled={isPoolLoading}
               title="Find different BTC pools with your current portfolio style"
             >
               <ArrowClockwise
-                size={16}
+                size={14}
                 className={isPoolLoading ? "animate-spin" : ""}
               />
-              {isPoolLoading ? <span className="lg:inline hidden">Finding...</span> : <span className="lg:inline hidden">Refresh Pools</span>}
+              <span className="hidden sm:inline">
+                {isPoolLoading ? "Finding..." : "Refresh Pools"}
+              </span>
             </Button>
           )}
 
           <Button
             variant="secondary"
             size="secondary"
-            className="bg-secondary/30 border-primary text-white flex items-center gap-2"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 text-xs"
             onClick={() => setIsPortfolioStyleModalOpen(true)}
           >
-            <span>
-              {selectedPortfolioStyle
-                ? `Portfolio: ${
-                    selectedPortfolioStyle.charAt(0).toUpperCase() +
-                    selectedPortfolioStyle.slice(1)
-                  }`
-                : "Select Portfolio Style"}
+            <span className="truncate max-w-[120px] sm:max-w-none">
+              {selectedPortfolioStyle ? (
+                <>
+                  <span className="hidden sm:inline">Portfolio: </span>
+                  {selectedPortfolioStyle.charAt(0).toUpperCase() + selectedPortfolioStyle.slice(1)}
+                </>
+              ) : (
+                <>
+                  <span className="hidden sm:inline">Select </span>Portfolio<span className="hidden sm:inline"> Style</span>
+                </>
+              )}
             </span>
           </Button>
         </div>
       </div>
 
       {/* Scrollable chat messages area */}
-      <div className="flex-1 overflow-y-auto lg:pb-8 pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-        <div className="flex flex-col [&:not(:first-child)]:mt-8">
+      <div className="flex-1 overflow-y-auto pb-4 scrollbar-hide">
+        <div className="flex flex-col space-y-6">
           {messageWithPools.map((item, index, array) => {
             const isPoolMessage =
               item.message.role === "assistant" &&
@@ -966,16 +972,18 @@ const ChatBox: React.FC = () => {
                   (isLoadingState || !isPoolMessage) && (
                     <>
                       {!(item.message.role === "assistant" && item.pools && item.pools.length > 0) && (
-                        <ChatMessage 
-                          message={item.message} 
-                          streamingMessage={showStreamingInMessage ? streamingMessage : undefined}
-                          isStreaming={showStreamingInMessage}
-                        />
+                        <div className="w-full break-words">
+                          <ChatMessage 
+                            message={item.message} 
+                            streamingMessage={showStreamingInMessage ? streamingMessage : undefined}
+                            isStreaming={showStreamingInMessage}
+                          />
+                        </div>
                       )}
                       {item.message.role === "assistant" &&
                         !item.pools &&
                         !isLoadingState && 
-                        !showStreamingInMessage && <hr className="mt-8" />}
+                        !showStreamingInMessage && <hr className="mt-6 border-border" />}
                     </>
                   )}
                 {item.pools && item.pools.length > 0 && (
@@ -1011,7 +1019,7 @@ const ChatBox: React.FC = () => {
                       }
                     })()}
 
-                    <hr className="mt-8" />
+                    <hr className="mt-6 border-border" />
                   </div>
                 )}
               </React.Fragment>
@@ -1022,19 +1030,21 @@ const ChatBox: React.FC = () => {
       </div>
 
       {/* Fixed chat input area */}
-      <QuickActionButtons
-        onQuickAction={handleQuickAction}
-        disabled={isLoading}
-      />
+      <div className="flex-shrink-0 pb-4">
+        <QuickActionButtons
+          onQuickAction={handleQuickAction}
+          disabled={isLoading}
+        />
 
-      <ChatInput
-        value={inputMessage}
-        onChange={(e) => setInputMessage(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={isLoading || isPoolLoading}
-        onSend={() => handleSendMessage()}
-        isLoading={isLoading}
-      />
+        <ChatInput
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isLoading || isPoolLoading}
+          onSend={() => handleSendMessage()}
+          isLoading={isLoading}
+        />
+      </div>
 
       {/* Add Liquidity Modal */}
       <AddLiquidityModal
