@@ -9,6 +9,8 @@ import {
   Plus,
   Wallet,
   ArrowClockwise,
+  Shuffle, // New icon for Jupiter Terminal
+  X, // Close icon
 } from "@phosphor-icons/react";
 import BtcPoolsList from "./BtcPoolsList";
 import BtcFilterDropdown from "./BtcFilterDropdown";
@@ -18,6 +20,7 @@ import QuickActionButtons from "./QuickActionButtons";
 import PortfolioStyleModal from "./PortfolioStyleModal";
 import ChatMessage from "@/components/chat-message";
 import ChatInput from "@/components/chat-input";
+import JupiterTerminal from "@/components/JupiterTerminal";
 import { fetchMessage } from "@/lib/api/chat";
 import { FormattedPool } from '@/lib/utils/poolUtils';
 import { useErrorHandler } from '@/lib/utils/errorHandling';
@@ -51,6 +54,9 @@ const ChatBox: React.FC = () => {
   const [selectedPortfolioStyle, setSelectedPortfolioStyle] = useState<string | null>(null);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
   const [activeTokenFilter, setActiveTokenFilter] = useState<string>('');
+  
+  // Jupiter Terminal state
+  const [showJupiterTerminal, setShowJupiterTerminal] = useState(false);
   
   // Pool tracking states
   const [shownPoolAddresses, setShownPoolAddresses] = useState<string[]>([]);
@@ -99,6 +105,15 @@ const ChatBox: React.FC = () => {
       /show.*more/i,
       /other options/i,
       /alternatives/i,
+    ],
+    swapRequest: [
+      /swap/i,
+      /exchange/i,
+      /trade.*token/i,
+      /convert.*to/i,
+      /buy.*with/i,
+      /sell.*for/i,
+      /jupiter/i,
     ],
   }), []);
 
@@ -173,13 +188,25 @@ const ChatBox: React.FC = () => {
       pattern.test(lowerMessage)
     );
     
+    // Check for swap requests
+    const isSwapRequest = MESSAGE_PATTERNS.swapRequest.some(pattern =>
+      pattern.test(lowerMessage)
+    );
+    
     return {
       isEducational,
       isPoolRequest,
       isAlternativeRequest,
-      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest
+      isSwapRequest,
+      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest && !isSwapRequest
     };
   }, [MESSAGE_PATTERNS]);
+
+  // Handle swap requests
+  const handleSwapRequest = useCallback(async () => {
+    addMessage("assistant", "I'll open Jupiter Terminal for you to swap tokens. Jupiter Terminal provides the best rates across all Solana DEXes.");
+    setShowJupiterTerminal(true);
+  }, [addMessage]);
 
   // Streaming response handler
   const handleStreamingResponse = useCallback(async (
@@ -543,7 +570,9 @@ const ChatBox: React.FC = () => {
         const intent = analyzeMessageIntent(userMessage);
         
         // Route to appropriate handler based on intent
-        if (intent.isEducational) {
+        if (intent.isSwapRequest) {
+          await handleSwapRequest();
+        } else if (intent.isEducational) {
           await handleEducationalQuery(userMessage);
         } else if (intent.isAlternativeRequest) {
           await handleAlternativePoolRequest();
@@ -566,6 +595,7 @@ const ChatBox: React.FC = () => {
       inputMessage,
       addMessage,
       analyzeMessageIntent,
+      handleSwapRequest,
       handleEducationalQuery,
       handleAlternativePoolRequest,
       handlePoolRequest,
@@ -836,6 +866,14 @@ const ChatBox: React.FC = () => {
                 Secure, non-custodial wallet integration for direct on-chain transactions.
               </p>
             </div>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Shuffle className="text-primary" size={18} />
+              </div>
+              <p className="text-white text-sm break-words">
+                Integrated Jupiter Terminal for seamless token swaps across all Solana DEXes.
+              </p>
+            </div>
           </div>
           
           {/* Portfolio Style Selection - Only this button */}
@@ -894,8 +932,20 @@ const ChatBox: React.FC = () => {
           />
         </div>
         
-        {/* Right side - Portfolio and Refresh buttons */}
+        {/* Right side - Portfolio, Jupiter, and Refresh buttons */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Jupiter Terminal Button */}
+          <Button
+            variant="secondary"
+            size="secondary"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20 text-xs"
+            onClick={() => setShowJupiterTerminal(true)}
+            title="Open Jupiter Terminal for token swaps"
+          >
+            <Shuffle size={14} />
+            <span className="hidden sm:inline">Swap</span>
+          </Button>
+
           {selectedPortfolioStyle && (
             <Button
               variant="secondary"
@@ -936,6 +986,31 @@ const ChatBox: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Jupiter Terminal Modal */}
+      {showJupiterTerminal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-background border border-border rounded-lg w-full max-w-md h-[600px] relative">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Jupiter Terminal</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowJupiterTerminal(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={18} />
+              </Button>
+            </div>
+            <div className="p-4 h-[calc(600px-80px)]">
+              <JupiterTerminal 
+                className="w-full h-full"
+                onClose={() => setShowJupiterTerminal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Scrollable chat messages area */}
       <div className="flex-1 overflow-y-auto pb-4 scrollbar-hide">
