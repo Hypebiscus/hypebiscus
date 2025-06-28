@@ -21,19 +21,19 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
   const filterOptions = [
     {
       id: 'wbtc-sol',
-      label: 'wBTC-SOL',
+      label: 'wBTC', // Changed from 'wBTC-SOL'
       description: 'Wrapped Bitcoin pools',
       icon: Bitcoin
     },
     {
       id: 'zbtc-sol',
-      label: 'zBTC-SOL',
+      label: 'zBTC', // Changed from 'zBTC-SOL'
       description: 'Zeus Bitcoin pools',
       icon: Bitcoin
     },
     {
       id: 'cbbtc-sol',
-      label: 'cbBTC-SOL',
+      label: 'cbBTC', // Changed from 'cbBTC-SOL'
       description: 'Coinbase Bitcoin pools',
       icon: Bitcoin
     }
@@ -42,18 +42,9 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
   const getActiveFilterLabel = () => {
     const activeOption = filterOptions.find(option => option.id === activeFilter);
     if (activeOption) {
-      return (
-        <>
-          <span className="hidden sm:inline">Pool: </span>
-          {activeOption.label}
-        </>
-      );
+      return activeOption.label; // Just show the token name without "Token:" prefix
     }
-    return (
-      <>
-        <span className="hidden sm:inline">Select </span>Pool<span className="hidden sm:inline"> Filter</span>
-      </>
-    );
+    return "Token";
   };
 
   const handleFilterSelect = (filterId: string) => {
@@ -69,7 +60,7 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
         size="secondary"
         onClick={() => setIsOpen(!isOpen)}
         disabled={isLoading}
-        className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20 min-w-[120px] sm:min-w-[160px] justify-between text-xs"
+        className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20 min-w-[80px] sm:min-w-[100px] justify-between text-xs"
       >
         <span className="truncate">{getActiveFilterLabel()}</span>
         <ChevronDown 
@@ -87,7 +78,7 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
           />
           
           {/* Dropdown Content */}
-          <div className="absolute top-full left-0 right-0 mt-1 bg-[#161616] border border-primary rounded-lg shadow-lg z-20 overflow-hidden">
+          <div className="absolute top-full left-0 mt-1 bg-[#161616] border border-primary rounded-lg shadow-lg z-20 overflow-hidden w-[280px] sm:w-[320px]">
             {filterOptions.map((option) => {
               const Icon = option.icon;
               const isSelected = activeFilter === option.id;
@@ -97,17 +88,16 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
                   key={option.id}
                   onClick={() => handleFilterSelect(option.id)}
                   disabled={isLoading}
-                  className={`w-full px-4 py-3 text-left hover:bg-primary/20 transition-colors flex items-center gap-3 ${
+                  className={`w-full px-6 py-4 text-left hover:bg-primary/20 transition-colors flex items-center gap-4 ${
                     isSelected ? 'bg-primary/10' : ''
                   } ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
-                  <Icon className="w-4 h-4 text-primary flex-shrink-0" />
+                  <Icon className="w-5 h-5 text-primary flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-white text-sm font-medium truncate">
-                      <span className="hidden sm:inline">Pool: </span>
+                    <div className="text-white text-base font-medium truncate">
                       {option.label}
                     </div>
-                    <div className="text-sub-text text-xs truncate">
+                    <div className="text-sub-text text-sm truncate mt-1">
                       {option.description}
                     </div>
                   </div>
