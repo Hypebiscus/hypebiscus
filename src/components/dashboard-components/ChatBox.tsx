@@ -1,7 +1,7 @@
 // src/components/dashboard-components/ChatBox.tsx
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   ChartLine,
@@ -9,13 +9,18 @@ import {
   Plus,
   Wallet,
   ArrowClockwise,
+  Shuffle, // New icon for Jupiter Terminal
+  X, // Close icon
 } from "@phosphor-icons/react";
 import BtcPoolsList from "./BtcPoolsList";
+import BtcFilterDropdown from "./BtcFilterDropdown";
+import BtcFilterModal from "./BtcFilterModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import QuickActionButtons from "./QuickActionButtons";
 import PortfolioStyleModal from "./PortfolioStyleModal";
 import ChatMessage from "@/components/chat-message";
 import ChatInput from "@/components/chat-input";
+import JupiterTerminal from "@/components/JupiterTerminal";
 import { fetchMessage } from "@/lib/api/chat";
 import { FormattedPool } from '@/lib/utils/poolUtils';
 import { useErrorHandler } from '@/lib/utils/errorHandling';
@@ -45,8 +50,13 @@ const ChatBox: React.FC = () => {
   const [selectedPool, setSelectedPool] = useState<FormattedPool | null>(null);
   const [isAddLiquidityModalOpen, setIsAddLiquidityModalOpen] = useState(false);
   const [isPortfolioStyleModalOpen, setIsPortfolioStyleModalOpen] = useState(false);
+  const [isBtcFilterModalOpen, setIsBtcFilterModalOpen] = useState(false);
   const [selectedPortfolioStyle, setSelectedPortfolioStyle] = useState<string | null>(null);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
+  const [activeTokenFilter, setActiveTokenFilter] = useState<string>('');
+  
+  // Jupiter Terminal state
+  const [showJupiterTerminal, setShowJupiterTerminal] = useState(false);
   
   // Pool tracking states
   const [shownPoolAddresses, setShownPoolAddresses] = useState<string[]>([]);
@@ -66,8 +76,8 @@ const ChatBox: React.FC = () => {
   const { handleError, handleAsyncError } = useErrorHandler();
   const { service: poolSearchService } = usePoolSearchService();
 
-  // Intent detection patterns
-  const MESSAGE_PATTERNS = {
+  // Intent detection patterns - moved to useMemo to avoid dependency warnings
+  const MESSAGE_PATTERNS = useMemo(() => ({
     educational: [
       /what is.*(?:pool|lp|liquidity)/i,
       /how does.*work/i,
@@ -96,7 +106,16 @@ const ChatBox: React.FC = () => {
       /other options/i,
       /alternatives/i,
     ],
-  };
+    swapRequest: [
+      /swap/i,
+      /exchange/i,
+      /trade.*token/i,
+      /convert.*to/i,
+      /buy.*with/i,
+      /sell.*for/i,
+      /jupiter/i,
+    ],
+  }), []);
 
   // Core message management
   const addMessage = useCallback(
@@ -169,13 +188,25 @@ const ChatBox: React.FC = () => {
       pattern.test(lowerMessage)
     );
     
+    // Check for swap requests
+    const isSwapRequest = MESSAGE_PATTERNS.swapRequest.some(pattern =>
+      pattern.test(lowerMessage)
+    );
+    
     return {
       isEducational,
       isPoolRequest,
       isAlternativeRequest,
-      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest
+      isSwapRequest,
+      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest && !isSwapRequest
     };
-  }, []);
+  }, [MESSAGE_PATTERNS]);
+
+  // Handle swap requests
+  const handleSwapRequest = useCallback(async () => {
+    addMessage("assistant", "I'll open Jupiter Terminal for you to swap tokens. Jupiter Terminal provides the best rates across all Solana DEXes.");
+    setShowJupiterTerminal(true);
+  }, [addMessage]);
 
   // Streaming response handler
   const handleStreamingResponse = useCallback(async (
@@ -235,58 +266,7 @@ const ChatBox: React.FC = () => {
     await handleStreamingResponse(messageHistory);
   }, [messages, handleStreamingResponse]);
 
-  // Handle alternative pool requests
-  const handleAlternativePoolRequest = useCallback(async () => {
-    console.log("User is asking for another pool");
-    
-    setDifferentPoolRequests((prev) => prev + 1);
-
-    const shownBinStepsForStyle =
-      shownBinStepsPerStyle[selectedPortfolioStyle || "conservative"] || [];
-    const preferredBinSteps = getPreferredBinSteps(selectedPortfolioStyle || "conservative");
-
-    const allPreferredBinStepsShown = preferredBinSteps.every((step) =>
-      shownBinStepsForStyle.includes(step)
-    );
-
-    if (allPreferredBinStepsShown) {
-      console.log("All preferred bin steps have been shown, resetting tracking to show them again");
-      setShownBinStepsPerStyle((prev) => ({
-        ...prev,
-        [selectedPortfolioStyle || "conservative"]: [],
-      }));
-    }
-
-    await showBestYieldPool(selectedPortfolioStyle || "conservative");
-  }, [
-    selectedPortfolioStyle,
-    shownBinStepsPerStyle,
-    setDifferentPoolRequests,
-    setShownBinStepsPerStyle
-  ]);
-
-  // Handle general pool requests
-  const handlePoolRequest = useCallback(async () => {
-    await showBestYieldPool(selectedPortfolioStyle || null);
-  }, [selectedPortfolioStyle]);
-
-  // Handle general chat
-  const handleGeneralChat = useCallback(async (userMessage: string) => {
-    const messageHistory = [
-      ...messages,
-      {
-        role: "user" as const,
-        content: userMessage,
-        timestamp: new Date(),
-      },
-    ];
-
-    await handleStreamingResponse(messageHistory);
-  }, [messages, handleStreamingResponse]);
-
-  /**
-   * Refactored showBestYieldPool using the new service
-   */
+  // Declare showBestYieldPool before it's used
   const showBestYieldPool = useCallback(
     async (style: string | null) => {
       setIsPoolLoading(true);
@@ -296,6 +276,7 @@ const ChatBox: React.FC = () => {
         const allPools = await poolSearchService.searchPools({
           style,
           shownPoolAddresses,
+          tokenFilter: activeTokenFilter || undefined, // Include active token filter
           onLoadingMessage: (message) => addMessage("assistant", message),
           onError: addErrorMessage,
           handleAsyncError
@@ -303,7 +284,7 @@ const ChatBox: React.FC = () => {
 
         // Handle no pools found
         if (allPools.length === 0) {
-          addMessage("assistant", poolSearchService.getNoPoolsFoundMessage());
+          addMessage("assistant", poolSearchService.getNoPoolsFoundMessage(activeTokenFilter || undefined));
           return;
         }
 
@@ -389,7 +370,7 @@ const ChatBox: React.FC = () => {
         } else {
           addMessage(
             "assistant",
-            `I couldn't find any ${style} pools that match your criteria at the moment. Please try again later or adjust your preferences.`
+            `I couldn't find any ${style || 'recommended'} pools that match your criteria at the moment. Please try again later or adjust your preferences.`
           );
         }
 
@@ -406,9 +387,168 @@ const ChatBox: React.FC = () => {
       handleAsyncError,
       addErrorMessage,
       shownPoolAddresses,
+      activeTokenFilter,
       cleanupLoadingMessages
     ]
   );
+
+  // Handle alternative pool requests
+  const handleAlternativePoolRequest = useCallback(async () => {
+    console.log("User is asking for another pool");
+    
+    setDifferentPoolRequests((prev) => prev + 1);
+
+    const shownBinStepsForStyle =
+      shownBinStepsPerStyle[selectedPortfolioStyle || "conservative"] || [];
+    const preferredBinSteps = getPreferredBinSteps(selectedPortfolioStyle || "conservative");
+
+    const allPreferredBinStepsShown = preferredBinSteps.every((step) =>
+      shownBinStepsForStyle.includes(step)
+    );
+
+    if (allPreferredBinStepsShown) {
+      console.log("All preferred bin steps have been shown, resetting tracking to show them again");
+      setShownBinStepsPerStyle((prev) => ({
+        ...prev,
+        [selectedPortfolioStyle || "conservative"]: [],
+      }));
+    }
+
+    await showBestYieldPool(selectedPortfolioStyle || "conservative");
+  }, [
+    selectedPortfolioStyle,
+    shownBinStepsPerStyle,
+    setDifferentPoolRequests,
+    setShownBinStepsPerStyle,
+    showBestYieldPool
+  ]);
+
+  // Handle general pool requests
+  const handlePoolRequest = useCallback(async () => {
+    await showBestYieldPool(selectedPortfolioStyle || null);
+  }, [selectedPortfolioStyle, showBestYieldPool]);
+
+  // Handle general chat
+  const handleGeneralChat = useCallback(async (userMessage: string) => {
+    const messageHistory = [
+      ...messages,
+      {
+        role: "user" as const,
+        content: userMessage,
+        timestamp: new Date(),
+      },
+    ];
+
+    await handleStreamingResponse(messageHistory);
+  }, [messages, handleStreamingResponse]);
+
+  // Handle token filter search
+  const handleTokenFilterSearch = useCallback(async (tokenFilter: string) => {
+    setActiveTokenFilter(tokenFilter);
+    
+    // Clear previous messages about filters
+    setMessages(prev => prev.filter(msg => 
+      !msg.content.includes('Filtering by') && 
+      !msg.content.includes('Showing pools for')
+    ));
+    
+    // Add user message indicating filter selection
+    const filterLabels: Record<string, string> = {
+      'wbtc-sol': 'wBTC-SOL',
+      'zbtc-sol': 'zBTC-SOL', 
+      'cbbtc-sol': 'cbBTC-SOL',
+      'btc': 'All BTC'
+    };
+    
+    const filterMessage = `Show me ${filterLabels[tokenFilter] || tokenFilter} pools`;
+    addMessage("user", filterMessage);
+    
+    // Set loading states
+    setIsLoading(true);
+    setIsPoolLoading(true);
+
+    try {
+      // Use the pool search service with token-specific filtering
+      const filteredPools = await poolSearchService.searchPools({
+        style: selectedPortfolioStyle,
+        shownPoolAddresses: [], // Reset shown pools for new filter
+        tokenFilter, // Pass the token filter
+        onLoadingMessage: (message) => addMessage("assistant", message),
+        onError: addErrorMessage,
+        handleAsyncError
+      });
+
+      if (filteredPools.length === 0) {
+        addMessage("assistant", `No ${filterLabels[tokenFilter] || tokenFilter} pools found that match your criteria. Try adjusting your portfolio style or check back later.`);
+        return;
+      }
+
+      // Get the best pool for the selected style and token filter
+      const selectedPool = poolSearchService.getBestPool(
+        filteredPools, 
+        selectedPortfolioStyle, 
+        []
+      );
+
+      if (selectedPool) {
+        // Reset shown pool addresses for new filter
+        setShownPoolAddresses([selectedPool.address]);
+
+        // Process the selected pool with AI analysis
+        addMessage("assistant", "", []);
+        setStreamingMessage("");
+        setIsStreaming(true);
+
+        await poolSearchService.processSelectedPool({
+          selectedPool,
+          style: selectedPortfolioStyle,
+          onStreamingUpdate: (chunk) => {
+            setStreamingMessage(prev => (prev || "") + chunk);
+          },
+          onComplete: (analysis, formattedPool) => {
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1].content = analysis;
+              return newMessages;
+            });
+            
+            setMessageWithPools(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                message: { ...newMessages[newMessages.length - 1].message, content: analysis },
+                pools: [formattedPool]
+              };
+              return newMessages;
+            });
+            
+            setStreamingMessage(null);
+            setIsStreaming(false);
+          },
+          onError: () => {
+            setStreamingMessage(null);
+            setIsStreaming(false);
+            addErrorMessage(new Error('Failed to analyze pool'));
+          }
+        });
+
+        // Clean up loading messages
+        cleanupLoadingMessages(selectedPortfolioStyle);
+      }
+    } catch (error) {
+      console.error("Error in token filter search:", error);
+      addErrorMessage(error);
+    } finally {
+      setIsLoading(false);
+      setIsPoolLoading(false);
+    }
+  }, [
+    selectedPortfolioStyle,
+    poolSearchService,
+    addMessage,
+    addErrorMessage,
+    handleAsyncError,
+    cleanupLoadingMessages
+  ]);
 
   // Main refactored handleSendMessage function
   const handleSendMessage = useCallback(
@@ -430,7 +570,9 @@ const ChatBox: React.FC = () => {
         const intent = analyzeMessageIntent(userMessage);
         
         // Route to appropriate handler based on intent
-        if (intent.isEducational) {
+        if (intent.isSwapRequest) {
+          await handleSwapRequest();
+        } else if (intent.isEducational) {
           await handleEducationalQuery(userMessage);
         } else if (intent.isAlternativeRequest) {
           await handleAlternativePoolRequest();
@@ -453,6 +595,7 @@ const ChatBox: React.FC = () => {
       inputMessage,
       addMessage,
       analyzeMessageIntent,
+      handleSwapRequest,
       handleEducationalQuery,
       handleAlternativePoolRequest,
       handlePoolRequest,
@@ -479,72 +622,94 @@ const ChatBox: React.FC = () => {
 
   const handleSelectPortfolioStyle = async (style: string) => {
     setSelectedPortfolioStyle(style);
-
-    try {
-      if (!showWelcomeScreen) {
-        addMessage("assistant", "", undefined);
-      } else {
-        setShowWelcomeScreen(false);
-        addMessage("assistant", "", undefined);
-      }
-
-      setStreamingMessage("");
-      setIsStreaming(true);
-      
-      const welcomeMessage = await fetchMessage(
-        [{ 
-          role: "user", 
-          content: `I've selected the ${style} portfolio style. Please provide a well-structured welcome message explaining what this means for my liquidity pool recommendations. Format it with clear bullet points for the key characteristics of this portfolio style and end with a brief question about what I'm interested in learning more about.` 
-        }],
-        undefined,
-        style,
-        (chunk) => {
-          setStreamingMessage(prev => (prev || "") + chunk);
-        }
-      );
-
-      setMessages(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1].content = welcomeMessage;
-        return newMessages;
-      });
-      
-      setMessageWithPools(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1].message.content = welcomeMessage;
-        return newMessages;
-      });
-      
-      setStreamingMessage(null);
-      setIsStreaming(false);
-
-      showBestYieldPool(style);
-    } catch (error) {
-      console.error("Error generating welcome message:", error);
-      
-      setStreamingMessage(null);
-      setIsStreaming(false);
-      
-      if (!showWelcomeScreen) {
-        addMessage(
-          "assistant",
-          `You've selected the ${
-            style.charAt(0).toUpperCase() + style.slice(1)
-          } portfolio style. I'll recommend pools that match your risk preference.`
-        );
-      } else {
-        setShowWelcomeScreen(false);
-        addMessage(
-          "assistant",
-          `Welcome! You've selected the ${
-            style.charAt(0).toUpperCase() + style.slice(1)
-          } portfolio style. I'll recommend pools that match your risk preference.`
-        );
-      }
-      
-      showBestYieldPool(style);
-    }
+    
+    // Close portfolio style modal and open BTC filter modal
+    setIsPortfolioStyleModalOpen(false);
+    setIsBtcFilterModalOpen(true);
   };
+
+  const handleSelectBtcFilter = async (filter: string) => {
+  setActiveTokenFilter(filter);
+  setIsBtcFilterModalOpen(false);
+
+  // Define filter labels inside the function
+  const filterLabels: Record<string, string> = {
+    'wbtc-sol': 'wBTC-SOL',
+    'zbtc-sol': 'zBTC-SOL',
+    'cbbtc-sol': 'cbBTC-SOL',
+    'btc': 'All BTC'
+  };
+
+  try {
+    if (!showWelcomeScreen) {
+      addMessage("assistant", "", undefined);
+    } else {
+      setShowWelcomeScreen(false);
+      addMessage("assistant", "", undefined);
+    }
+
+    setStreamingMessage("");
+    setIsStreaming(true);
+    
+    // Generate portfolio + filter specific welcome message
+    const portfolioStyle = selectedPortfolioStyle || 'conservative'; // Fix: provide fallback
+    const welcomeMessage = await fetchMessage(
+      [{ 
+        role: "user", 
+        content: `I've selected the ${portfolioStyle} portfolio style and want to focus on ${filterLabels[filter] || filter} pools. Please provide a well-structured welcome message explaining what this combination means for my liquidity pool recommendations. Include key characteristics of this portfolio style as it applies to ${filterLabels[filter] || filter} pools specifically.` 
+      }],
+      undefined,
+      portfolioStyle, // Use the fallback variable
+      (chunk) => {
+        setStreamingMessage(prev => (prev || "") + chunk);
+      }
+    );
+
+    setMessages(prev => {
+      const newMessages = [...prev];
+      newMessages[newMessages.length - 1].content = welcomeMessage;
+      return newMessages;
+    });
+    
+    setMessageWithPools(prev => {
+      const newMessages = [...prev];
+      newMessages[newMessages.length - 1].message.content = welcomeMessage;
+      return newMessages;
+    });
+    
+    setStreamingMessage(null);
+    setIsStreaming(false);
+
+    // Start searching for pools with the selected filter
+    await handleTokenFilterSearch(filter);
+    
+  } catch (error) {
+    console.error("Error generating welcome message:", error);
+    
+    setStreamingMessage(null);
+    setIsStreaming(false);
+    
+    // Fix: Use safe string manipulation with fallbacks
+    const portfolioStyleFormatted = selectedPortfolioStyle 
+      ? selectedPortfolioStyle.charAt(0).toUpperCase() + selectedPortfolioStyle.slice(1)
+      : 'Conservative';
+    
+    if (!showWelcomeScreen) {
+      addMessage(
+        "assistant",
+        `You've selected the ${portfolioStyleFormatted} portfolio style focusing on ${filterLabels[filter] || filter} pools. I'll recommend pools that match your preferences.`
+      );
+    } else {
+      setShowWelcomeScreen(false);
+      addMessage(
+        "assistant",
+        `Welcome! You've selected the ${portfolioStyleFormatted} portfolio style with ${filterLabels[filter] || filter} focus. I'll recommend pools that match your preferences.`
+      );
+    }
+    
+    await handleTokenFilterSearch(filter);
+  }
+};
 
   const handleRefreshPools = useCallback(async () => {
     if (!selectedPortfolioStyle) {
@@ -578,7 +743,7 @@ const ChatBox: React.FC = () => {
     }
   }, [messages, showWelcomeScreen]);
 
-  // Split AI response function (unchanged)
+  // Split AI response function
   const splitAIResponse = (response: string): { part1: string, part2: string } => {
     if (!response) return { part1: "", part2: "" };
     
@@ -659,124 +824,197 @@ const ChatBox: React.FC = () => {
   // Render component
   if (showWelcomeScreen) {
     return (
-      <div className="flex flex-col h-[calc(100vh-100px)] w-full lg:max-w-4xl mx-auto">
-        <div className="flex-1 flex flex-col items-center justify-start p-6 lg:mt-14">
-          <h1 className="lg:text-3xl text-xl font-bold text-primary mb-2">
+      <div className="flex flex-col h-[calc(100vh-100px)] w-full max-w-4xl mx-auto px-4">
+        <div className="flex-1 flex flex-col items-center justify-start p-4 mt-8 overflow-y-auto">
+          <h1 className="text-2xl md:text-3xl font-bold text-primary mb-2 text-center">
             Welcome to Hypebiscus
           </h1>
-          <p className="text-white text-center font-medium max-w-md lg:mb-8 mb-4">
-            Your smart assistant for exploring BTC liquidity in the Solana DeFi
-            ecosystem.
+          <p className="text-white text-center font-medium max-w-md mb-6 text-sm md:text-base break-words">
+            Your smart assistant for exploring BTC liquidity in the Solana DeFi ecosystem.
           </p>
-          <div className="lg:grid grid-cols-1 max-w-2xl gap-4 mb-6">
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <Clock className="text-primary" size={20} />
+          
+          <div className="grid grid-cols-1 max-w-2xl gap-3 mb-6 w-full">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Clock className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
+              <p className="text-white text-sm break-words">
                 Real-time discovery of BTC and zBTC liquidity pools on Solana.
               </p>
             </div>
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <Plus className="text-primary" size={20} />
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Plus className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
+              <p className="text-white text-sm break-words">
                 Instant &apos;Add Position&apos; capability.
               </p>
             </div>
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <ChartLine className="text-primary" size={20} />
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <ChartLine className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
-                Live pool analytics, including TVL, APR, and recent liquidity
-                changes.
+              <p className="text-white text-sm break-words">
+                Live pool analytics, including TVL, APR, and recent liquidity changes.
               </p>
             </div>
-            <div className="flex items-center gap-2 mb-2 lg:mb-0">
-              <div>
-                <Wallet className="text-primary" size={20} />
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Wallet className="text-primary" size={18} />
               </div>
-              <p className="text-white text-left lg:text-base text-sm">
-                Secure, non-custodial wallet integration for direct on-chain
-                transactions.
+              <p className="text-white text-sm break-words">
+                Secure, non-custodial wallet integration for direct on-chain transactions.
+              </p>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <Shuffle className="text-primary" size={18} />
+              </div>
+              <p className="text-white text-sm break-words">
+                Integrated Jupiter Terminal for seamless token swaps across all Solana DEXes.
               </p>
             </div>
           </div>
+          
+          {/* Portfolio Style Selection - Only this button */}
           <Button
             variant="outline"
             size="secondary"
-            className="bg-secondary/30 border-primary text-white flex items-center gap-2"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 w-full max-w-xs"
             onClick={() => setIsPortfolioStyleModalOpen(true)}
           >
-            <ChartLine size={20} />
+            <ChartLine size={18} />
             <span>Select Portfolio Style</span>
           </Button>
         </div>
 
-        <QuickActionButtons
-          onQuickAction={handleQuickAction}
-          disabled={isLoading}
-        />
-        <ChatInput
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={isLoading || isPoolLoading}
-          onSend={() => handleSendMessage()}
-          isLoading={isLoading}
-        />
+        <div className="flex-shrink-0 px-4 pb-4">
+          <QuickActionButtons
+            onQuickAction={handleQuickAction}
+            disabled={isLoading}
+          />
+          <ChatInput
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading || isPoolLoading}
+            onSend={() => handleSendMessage()}
+            isLoading={isLoading}
+          />
+        </div>
 
+        {/* Portfolio Style Modal */}
         <PortfolioStyleModal
           isOpen={isPortfolioStyleModalOpen}
           onClose={() => setIsPortfolioStyleModalOpen(false)}
           onSelectStyle={handleSelectPortfolioStyle}
+        />
+        
+        {/* BTC Filter Modal */}
+        <BtcFilterModal
+          isOpen={isBtcFilterModalOpen}
+          onClose={() => setIsBtcFilterModalOpen(false)}
+          onSelectFilter={handleSelectBtcFilter}
         />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] lg:max-w-4xl mx-auto">
-      <div className="flex justify-end lg:mb-10 mb-4 gap-2">
-        {selectedPortfolioStyle && (
+    <div className="flex flex-col h-[calc(100vh-100px)] max-w-4xl mx-auto px-4">
+      <div className="flex justify-between items-center mb-6 gap-2 flex-wrap">
+        {/* Left side - BTC Filter Dropdown */}
+        <div className="flex-shrink-0 min-w-0">
+          <BtcFilterDropdown
+            onFilterSelect={handleTokenFilterSearch}
+            isLoading={isLoading || isPoolLoading}
+            activeFilter={activeTokenFilter}
+          />
+        </div>
+        
+        {/* Right side - Portfolio, Jupiter, and Refresh buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Jupiter Terminal Button */}
           <Button
             variant="secondary"
             size="secondary"
-            className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20"
-            onClick={handleRefreshPools}
-            disabled={isPoolLoading}
-            title="Find different BTC pools with your current portfolio style"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20 text-xs"
+            onClick={() => setShowJupiterTerminal(true)}
+            title="Open Jupiter Terminal for token swaps"
           >
-            <ArrowClockwise
-              size={16}
-              className={isPoolLoading ? "animate-spin" : ""}
-            />
-            {isPoolLoading ? <span className="lg:inline hidden">Finding...</span> : <span className="lg:inline hidden">Refresh Pools</span>}
+            <Shuffle size={14} />
+            <span className="hidden sm:inline">Swap</span>
           </Button>
-        )}
 
-        <Button
-          variant="secondary"
-          size="secondary"
-          className="bg-secondary/30 border-primary text-white flex items-center gap-2"
-          onClick={() => setIsPortfolioStyleModalOpen(true)}
-        >
-          <span>
-            {selectedPortfolioStyle
-              ? `Portfolio: ${
-                  selectedPortfolioStyle.charAt(0).toUpperCase() +
-                  selectedPortfolioStyle.slice(1)
-                }`
-              : "Select Portfolio Style"}
-          </span>
-        </Button>
+          {selectedPortfolioStyle && (
+            <Button
+              variant="secondary"
+              size="secondary"
+              className="bg-secondary/30 border-primary text-white flex items-center gap-2 hover:bg-primary/20 text-xs"
+              onClick={handleRefreshPools}
+              disabled={isPoolLoading}
+              title="Find different BTC pools with your current portfolio style"
+            >
+              <ArrowClockwise
+                size={14}
+                className={isPoolLoading ? "animate-spin" : ""}
+              />
+              <span className="hidden sm:inline">
+                {isPoolLoading ? "Finding..." : "Refresh Pools"}
+              </span>
+            </Button>
+          )}
+
+          <Button
+            variant="secondary"
+            size="secondary"
+            className="bg-secondary/30 border-primary text-white flex items-center gap-2 text-xs"
+            onClick={() => setIsPortfolioStyleModalOpen(true)}
+          >
+            <span className="truncate max-w-[120px] sm:max-w-none">
+              {selectedPortfolioStyle ? (
+                <>
+                  <span className="hidden sm:inline">Portfolio: </span>
+                  {selectedPortfolioStyle.charAt(0).toUpperCase() + selectedPortfolioStyle.slice(1)}
+                </>
+              ) : (
+                <>
+                  <span className="hidden sm:inline">Select </span>Portfolio<span className="hidden sm:inline"> Style</span>
+                </>
+              )}
+            </span>
+          </Button>
+        </div>
       </div>
 
+      {/* Jupiter Terminal Modal */}
+      {showJupiterTerminal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-background border border-border rounded-lg w-full max-w-md h-[600px] relative">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Jupiter Terminal</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowJupiterTerminal(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={18} />
+              </Button>
+            </div>
+            <div className="p-4 h-[calc(600px-80px)]">
+              <JupiterTerminal 
+                className="w-full h-full"
+                onClose={() => setShowJupiterTerminal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scrollable chat messages area */}
-      <div className="flex-1 overflow-y-auto lg:pb-8 pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-        <div className="flex flex-col [&:not(:first-child)]:mt-8">
+      <div className="flex-1 overflow-y-auto pb-4 scrollbar-hide">
+        <div className="flex flex-col space-y-6">
           {messageWithPools.map((item, index, array) => {
             const isPoolMessage =
               item.message.role === "assistant" &&
@@ -809,16 +1047,18 @@ const ChatBox: React.FC = () => {
                   (isLoadingState || !isPoolMessage) && (
                     <>
                       {!(item.message.role === "assistant" && item.pools && item.pools.length > 0) && (
-                        <ChatMessage 
-                          message={item.message} 
-                          streamingMessage={showStreamingInMessage ? streamingMessage : undefined}
-                          isStreaming={showStreamingInMessage}
-                        />
+                        <div className="w-full break-words">
+                          <ChatMessage 
+                            message={item.message} 
+                            streamingMessage={showStreamingInMessage ? streamingMessage : undefined}
+                            isStreaming={showStreamingInMessage}
+                          />
+                        </div>
                       )}
                       {item.message.role === "assistant" &&
                         !item.pools &&
                         !isLoadingState && 
-                        !showStreamingInMessage && <hr className="mt-8" />}
+                        !showStreamingInMessage && <hr className="mt-6 border-border" />}
                     </>
                   )}
                 {item.pools && item.pools.length > 0 && (
@@ -854,7 +1094,7 @@ const ChatBox: React.FC = () => {
                       }
                     })()}
 
-                    <hr className="mt-8" />
+                    <hr className="mt-6 border-border" />
                   </div>
                 )}
               </React.Fragment>
@@ -865,19 +1105,21 @@ const ChatBox: React.FC = () => {
       </div>
 
       {/* Fixed chat input area */}
-      <QuickActionButtons
-        onQuickAction={handleQuickAction}
-        disabled={isLoading}
-      />
+      <div className="flex-shrink-0 pb-4">
+        <QuickActionButtons
+          onQuickAction={handleQuickAction}
+          disabled={isLoading}
+        />
 
-      <ChatInput
-        value={inputMessage}
-        onChange={(e) => setInputMessage(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={isLoading || isPoolLoading}
-        onSend={() => handleSendMessage()}
-        isLoading={isLoading}
-      />
+        <ChatInput
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isLoading || isPoolLoading}
+          onSend={() => handleSendMessage()}
+          isLoading={isLoading}
+        />
+      </div>
 
       {/* Add Liquidity Modal */}
       <AddLiquidityModal
@@ -891,6 +1133,13 @@ const ChatBox: React.FC = () => {
         isOpen={isPortfolioStyleModalOpen}
         onClose={() => setIsPortfolioStyleModalOpen(false)}
         onSelectStyle={handleSelectPortfolioStyle}
+      />
+
+      {/* BTC Filter Modal */}
+      <BtcFilterModal
+        isOpen={isBtcFilterModalOpen}
+        onClose={() => setIsBtcFilterModalOpen(false)}
+        onSelectFilter={handleSelectBtcFilter}
       />
     </div>
   );
