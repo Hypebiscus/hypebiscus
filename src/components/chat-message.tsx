@@ -38,14 +38,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, streamingMessage, is
      message.content.toLowerCase().includes("welcome"));
 
   return (
-    <div className={`flex ${isUser ? "justify-end [&:not(:first-child)]:mt-8" : "justify-start"}`}>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={`max-w-full ${
           isUser
             ? "bg-white/10 border border-border text-white text-left rounded-full py-2 px-4"
             : isWelcomeMessage 
-              ? "[&>*:not(:first-child)]:mt-8" 
-              : "pt-8"
+              ? "pt-8" 
+              : "pt-0"
         }`}
       >
         <p>
