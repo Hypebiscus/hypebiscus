@@ -9,8 +9,7 @@ import {
   Plus,
   Wallet,
   ArrowClockwise,
-  Shuffle, // New icon for Jupiter Terminal
-  X, // Close icon
+  Shuffle,
 } from "@phosphor-icons/react";
 import BtcPoolsList from "./BtcPoolsList";
 import BtcFilterDropdown from "./BtcFilterDropdown";
@@ -22,10 +21,9 @@ import ChatMessage from "@/components/chat-message";
 import ChatInput from "@/components/chat-input";
 import JupiterTerminal from "@/components/JupiterTerminal";
 import { fetchMessage } from "@/lib/api/chat";
-import { FormattedPool } from '@/lib/utils/poolUtils';
+import { FormattedPool, formatPool, getPreferredBinSteps } from '@/lib/utils/poolUtils';
 import { useErrorHandler } from '@/lib/utils/errorHandling';
 import { usePoolSearchService } from '@/lib/services/poolSearchService';
-import { getPreferredBinSteps } from '@/lib/utils/poolUtils';
 
 // Type definitions
 type MessageRole = "user" | "assistant";
@@ -309,21 +307,28 @@ const ChatBox: React.FC = () => {
 
           console.log(`Adding pool with bin step ${selectedPool.bin_step} to shown pools for ${style} portfolio`);
 
-          // Add empty assistant message to start streaming
-          addMessage("assistant", "", []);
+          // First add the pool to the UI without AI analysis
+          // Create a simple formatted pool with just the essential data
+          const formattedPool: FormattedPool = formatPool(selectedPool, style || 'conservative');
+          
+          // Add empty assistant message with the pool data
+          // This will show the pool UI immediately before streaming starts
+          addMessage("assistant", "", [formattedPool]);
           
           // Reset streaming state
           setStreamingMessage("");
           setIsStreaming(true);
-
-          // Process the selected pool with AI analysis
+          
+                      // We've already added the pool to the message, so we don't need this step anymore
+          
+          // Now process the selected pool with AI analysis
           await poolSearchService.processSelectedPool({
             selectedPool,
             style,
             onStreamingUpdate: (chunk) => {
               setStreamingMessage(prev => (prev || "") + chunk);
             },
-            onComplete: (analysis, formattedPool) => {
+            onComplete: (analysis) => {
               // Update the placeholder message with the full response
               setMessages(prev => {
                 const newMessages = [...prev];
@@ -331,11 +336,12 @@ const ChatBox: React.FC = () => {
                 return newMessages;
               });
               
+              // Update the message content but keep our existing pool data
               setMessageWithPools(prev => {
                 const newMessages = [...prev];
                 newMessages[newMessages.length - 1] = {
                   message: { ...newMessages[newMessages.length - 1].message, content: analysis },
-                  pools: [formattedPool]
+                  pools: newMessages[newMessages.length - 1].pools // Keep existing pools
                 };
                 return newMessages;
               });
@@ -494,8 +500,13 @@ const ChatBox: React.FC = () => {
         // Reset shown pool addresses for new filter
         setShownPoolAddresses([selectedPool.address]);
 
-        // Process the selected pool with AI analysis
-        addMessage("assistant", "", []);
+        // First create a formatted pool to display immediately
+        const formattedPool: FormattedPool = formatPool(selectedPool, selectedPortfolioStyle || 'conservative');
+        
+        // Add message with the pool data so it shows immediately
+        addMessage("assistant", "", [formattedPool]);
+        
+        // Start streaming the AI analysis
         setStreamingMessage("");
         setIsStreaming(true);
 
@@ -505,18 +516,19 @@ const ChatBox: React.FC = () => {
           onStreamingUpdate: (chunk) => {
             setStreamingMessage(prev => (prev || "") + chunk);
           },
-          onComplete: (analysis, formattedPool) => {
+          onComplete: (analysis) => {
             setMessages(prev => {
               const newMessages = [...prev];
               newMessages[newMessages.length - 1].content = analysis;
               return newMessages;
             });
             
+            // Update the message content but keep our existing pool data
             setMessageWithPools(prev => {
               const newMessages = [...prev];
               newMessages[newMessages.length - 1] = {
                 message: { ...newMessages[newMessages.length - 1].message, content: analysis },
-                pools: [formattedPool]
+                pools: newMessages[newMessages.length - 1].pools // Keep existing pools
               };
               return newMessages;
             });
@@ -651,19 +663,19 @@ const ChatBox: React.FC = () => {
     setStreamingMessage("");
     setIsStreaming(true);
     
-    // Generate portfolio + filter specific welcome message
-    const portfolioStyle = selectedPortfolioStyle || 'conservative'; // Fix: provide fallback
-    const welcomeMessage = await fetchMessage(
-      [{ 
-        role: "user", 
-        content: `I've selected the ${portfolioStyle} portfolio style and want to focus on ${filterLabels[filter] || filter} pools. Please provide a well-structured welcome message explaining what this combination means for my liquidity pool recommendations. Include key characteristics of this portfolio style as it applies to ${filterLabels[filter] || filter} pools specifically.` 
-      }],
-      undefined,
-      portfolioStyle, // Use the fallback variable
-      (chunk) => {
-        setStreamingMessage(prev => (prev || "") + chunk);
-      }
-    );
+         // Generate concise portfolio + filter specific welcome message
+     const portfolioStyle = selectedPortfolioStyle || 'conservative'; // Fix: provide fallback
+     const welcomeMessage = await fetchMessage(
+       [{ 
+         role: "user", 
+         content: `I've selected the ${portfolioStyle} portfolio style and want to focus on ${filterLabels[filter] || filter} pools. Please provide a VERY BRIEF welcome message (2-3 sentences maximum) that welcomes me to Hypebiscus and explains what this combination means for my liquidity pool recommendations. Be concise but engaging.` 
+       }],
+       undefined,
+       portfolioStyle, // Use the fallback variable
+       (chunk) => {
+         setStreamingMessage(prev => (prev || "") + chunk);
+       }
+     );
 
     setMessages(prev => {
       const newMessages = [...prev];
@@ -825,7 +837,7 @@ const ChatBox: React.FC = () => {
   if (showWelcomeScreen) {
     return (
       <div className="flex flex-col h-[calc(100vh-100px)] w-full max-w-4xl mx-auto px-4">
-        <div className="flex-1 flex flex-col items-center justify-start p-4 mt-8 overflow-y-auto">
+        <div className="flex-1 flex flex-col items-center justify-start lg:p-4 p-0 mt-8 overflow-y-auto">
           <h1 className="text-2xl md:text-3xl font-bold text-primary mb-2 text-center">
             Welcome to Hypebiscus
           </h1>
@@ -888,7 +900,7 @@ const ChatBox: React.FC = () => {
           </Button>
         </div>
 
-        <div className="flex-shrink-0 px-4 pb-4">
+        <div className="flex-shrink-0 lg:px-4 pb-4">
           <QuickActionButtons
             onQuickAction={handleQuickAction}
             disabled={isLoading}
@@ -921,8 +933,8 @@ const ChatBox: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] max-w-4xl mx-auto px-4">
-      <div className="flex justify-between items-center mb-6 gap-2 flex-wrap">
+    <div className="flex flex-col h-[calc(100vh-100px)] max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-6 flex-wrap">
         {/* Left side - BTC Filter Dropdown */}
         <div className="flex-shrink-0 min-w-0">
           <BtcFilterDropdown
@@ -933,7 +945,7 @@ const ChatBox: React.FC = () => {
         </div>
         
         {/* Right side - Portfolio, Jupiter, and Refresh buttons */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center lg:gap-2 gap-1 flex-shrink-0">
           {/* Jupiter Terminal Button */}
           <Button
             variant="secondary"
@@ -989,25 +1001,18 @@ const ChatBox: React.FC = () => {
 
       {/* Jupiter Terminal Modal */}
       {showJupiterTerminal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-background border border-border rounded-lg w-full max-w-md h-[600px] relative">
-            <div className="p-4 border-b border-border flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white">Jupiter Terminal</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowJupiterTerminal(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                <X size={18} />
-              </Button>
-            </div>
-            <div className="p-4 h-[calc(600px-80px)]">
-              <JupiterTerminal 
-                className="w-full h-full"
-                onClose={() => setShowJupiterTerminal(false)}
-              />
-            </div>
+        <div 
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowJupiterTerminal(false)}
+        >
+          <div 
+            className="w-full max-w-md lg:h-[600px] h-[85vh] max-h-[800px] rounded-lg overflow-hidden"
+            onClick={(e) => e.stopPropagation()} // Prevent clicks on terminal from closing modal
+          >
+            <JupiterTerminal 
+              className="w-full"
+              onClose={() => setShowJupiterTerminal(false)}
+            />
           </div>
         </div>
       )}
@@ -1058,7 +1063,7 @@ const ChatBox: React.FC = () => {
                       {item.message.role === "assistant" &&
                         !item.pools &&
                         !isLoadingState && 
-                        !showStreamingInMessage && <hr className="mt-6 border-border" />}
+                        !showStreamingInMessage && <hr className="mt-6 mb-10 border-border" />}
                     </>
                   )}
                 {item.pools && item.pools.length > 0 && (
@@ -1094,7 +1099,7 @@ const ChatBox: React.FC = () => {
                       }
                     })()}
 
-                    <hr className="mt-6 border-border" />
+                    <hr className="mt-12 mb-8 border-border" />
                   </div>
                 )}
               </React.Fragment>
@@ -1105,7 +1110,7 @@ const ChatBox: React.FC = () => {
       </div>
 
       {/* Fixed chat input area */}
-      <div className="flex-shrink-0 pb-4">
+      <div className="flex-shrink-0 lg:pb-4 pb-0">
         <QuickActionButtons
           onQuickAction={handleQuickAction}
           disabled={isLoading}

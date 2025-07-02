@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     
     // If pool data is provided, enhance system prompt
     if (poolData) {
-      systemPrompt += " When analyzing liquidity pools, provide detailed yet concise assessments of risks, benefits, and opportunities. Tailor your analysis to the user's selected portfolio style, explaining why specific parameters (like bin steps) are appropriate for their risk tolerance. Focus on bin step relevance, risk level, potential returns, and key metrics. End your analysis with 1-2 thought-provoking questions about their investment goals or risk preferences."
+      systemPrompt += " When analyzing liquidity pools, provide detailed yet concise assessments of risks, benefits, and opportunities. Format your analysis in bullet points, with each key point on a new line. Separate your analysis into two clear sections: 1) Why this pool is suitable, and 2) Risk considerations. For each bullet point, focus on one specific advantage or risk factor. Avoid introductory phrases like 'Analyzing this pool...' or 'Key metrics to consider...' at the start of bullet points. Tailor your analysis to the user's selected portfolio style, explaining why specific parameters (like bin steps) are appropriate for their risk tolerance. Focus on bin step relevance, risk level, potential returns, and key metrics. End your analysis with 1-2 thought-provoking questions about their investment goals or risk preferences."
     }
 
     console.log('API route: Calling Anthropic API with streaming');
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
               ...(poolData ? [{
                 role: 'user' as const,
                 content: `I need you to analyze this ${portfolioStyle || 'general'} crypto liquidity pool and provide insights: ${JSON.stringify(poolData)}. 
-                Focus on explaining why this pool is appropriate for a ${portfolioStyle || 'general'} investor, discuss the bin step (${poolData.binStep}) relevance, evaluate the risk level, explain potential returns, and highlight key metrics.`
+                Format your response in clear bullet points, with each point starting on a new line. First, provide a brief introduction (1-2 sentences). Then list 3-5 bullet points explaining why this pool is appropriate for a ${portfolioStyle || 'general'} investor. After that, list 2-3 bullet points about risk considerations. Discuss the bin step (${poolData.binStep}) relevance, evaluate the risk level, explain potential returns, and highlight key metrics. Each bullet point should be concise and focused on one specific advantage or consideration.`
               }] : [])
             ],
             stream: true,

@@ -100,7 +100,7 @@ const BtcPoolsList: React.FC<BtcPoolsListProps> = ({
   }
 
   return (
-    <div className="space-y-6 mt-8">
+    <div className="space-y-6">
       {pools.map((pool, index) => (
         <div key={index}>
           {/* Pool Header */}

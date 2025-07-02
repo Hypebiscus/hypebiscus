@@ -2,7 +2,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X } from "@phosphor-icons/react";
 
 interface JupiterTerminalProps {
   className?: string;
@@ -11,7 +10,6 @@ interface JupiterTerminalProps {
 
 const JupiterTerminal: React.FC<JupiterTerminalProps> = ({ 
   className = "", 
-  onClose 
 }) => {
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,15 +99,6 @@ const JupiterTerminal: React.FC<JupiterTerminalProps> = ({
 
   return (
     <div className={`relative ${className}`}>
-      {onClose && (
-        <button
-          onClick={onClose}
-          className="absolute top-2 right-2 z-10 p-1 rounded-full bg-black/50 hover:bg-black/70 text-white"
-          title="Close Jupiter Terminal"
-        >
-          <X size={16} />
-        </button>
-      )}
       <div id="jupiter-terminal" className="w-full" />
     </div>
   );
