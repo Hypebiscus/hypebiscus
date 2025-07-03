@@ -8,7 +8,7 @@ const Bridge = () => {
   return (
     <PageTemplate>
       <div className="w-full h-full flex flex-col items-center justify-start">
-        <Tabs defaultValue="zeus" className="w-[400px]">
+        <Tabs defaultValue="zeus" className="lg:w-[400px] w-full lg:px-0 px-4 mb-8">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="zeus">Zeus</TabsTrigger>
             <TabsTrigger value="wormhole">Wormhole</TabsTrigger>

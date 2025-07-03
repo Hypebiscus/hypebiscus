@@ -19,6 +19,12 @@
   --secondary: rgba(91, 4, 4, 0.5);
   --secondary-foreground: #171717;
 
+  --tertiary: #1BE3C2;
+  --tertiary-foreground: #1be3c233;
+
+  --quaternary: #EFB54B;
+  --quaternary-foreground: rgb(239, 181, 75, 0.2);
+
   --secondary-button-background: rgba(91, 4, 4, 0.5);
   --menu-background: rgba(28, 28, 28, 0.5);
   --sub-text: #A0A0A0;
@@ -147,6 +153,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sub-text: var(--sub-text);
+  
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
@@ -166,6 +173,12 @@
   --shadow-2xl: var(--shadow-2xl);
 
   --menu-background: var(--menu-background);
+  --secondary-button-background: var(--secondary-button-background);
+
+  --tertiary: var(--tertiary);
+  --tertiary-foreground: var(--tertiary-foreground);
+  --quaternary: var(--quaternary);
+  --quaternary-foreground: var(--quaternary-foreground);
 }
 
 @layer base {
@@ -189,7 +202,10 @@ h2{
 
 p {
   font-family: Inter, sans-serif;
-  font-weight: 400;
+}
+
+ul li {
+  font-family: Inter, sans-serif;
 }
 
 /* Custom Wallet Adapter Styles */
@@ -204,4 +220,24 @@ p {
 .wallet-adapter-dropdown-list-item:hover {
   background-color: var(--primary) !important;
   color: #fff !important;
+}
+
+/* Add scrollbar-hide utility class at the end of the file */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+
+@media (max-width: 768px) {
+  .wallet-adapter-button-trigger {
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+    font-size: 14px !important;
+    height: 100% !important;
+    line-height: 100% !important;
+  }
 }

@@ -15,14 +15,24 @@ interface WalletContextProviderProps {
 }
 
 export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children }) => {
-  // The network can be set to 'devnet', 'testnet', or 'mainnet-beta'
-  const network = WalletAdapterNetwork.Devnet
+  // Get network from environment variable
+  const networkString = process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'mainnet-beta';
+  const network = networkString === 'devnet' 
+    ? WalletAdapterNetwork.Devnet 
+    : networkString === 'testnet'
+      ? WalletAdapterNetwork.Testnet
+      : WalletAdapterNetwork.Mainnet;
   
-  // You can also provide a custom RPC endpoint
-  const endpoint = useMemo(() => clusterApiUrl(network), [network])
+  // Get RPC URL from environment variable or fallback to public endpoint
+  const endpoint = useMemo(() => 
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(network), 
+    [network]
+  );
   
-  // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking --
-  // Only the wallets you configure here will be compiled into your application
+  console.log(`Using Solana network: ${network}`);
+  console.log(`Using RPC endpoint: ${endpoint.split('/').slice(0, 3).join('/')}/...`); // Log only domain part for security
+  
+  // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),
@@ -30,7 +40,7 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
       new TorusWalletAdapter()
     ],
     [network]
-  )
+  );
 
   return (
     <ConnectionProvider endpoint={endpoint}>
@@ -40,5 +50,5 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
         </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
-  )
-} 
+  );
+}
