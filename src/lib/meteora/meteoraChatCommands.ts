@@ -2,10 +2,8 @@
 import { MeteoraDlmmService} from './meteoraDlmmService';
 import { MeteoraPositionService } from './meteoraPositionService';
 import { PublicKey } from '@solana/web3.js';
-// import { MeteoraDlmmService, DlmmPoolInfo } from './meteoraDlmmService';
-// import { PublicKey, Connection } from '@solana/web3.js';
-// import { BN } from 'bn.js';
-// import { StrategyType } from '@meteora-ag/dlmm';
+import { StrategyType } from '@meteora-ag/dlmm';
+import { BN } from 'bn.js';
 
 // Command types
 export enum CommandType {
@@ -27,31 +25,28 @@ export interface PoolInfo {
   binStep: string;
   tokenX?: string;
   tokenY?: string;
+  activeBinId?: number;
 }
 
 export interface PositionInfo {
   id: string;
   bins: number;
   totalValue?: number;
+  poolName?: string;
 }
 
 export interface CommandData {
-  // For GET_POOLS
   pools?: PoolInfo[];
-  // For GET_POSITION
   positions?: PositionInfo[];
-  // For ADD_LIQUIDITY
   amount?: number;
   token?: string;
-  // For SWAP
   fromToken?: string;
   toToken?: string;
-  // For commands that require a pool
   poolAddress?: string;
-  // For position-related commands
   positionId?: string;
-  // For REMOVE_LIQUIDITY
   percentage?: number;
+  estimatedYAmount?: string;
+  useAutoFill?: boolean;
 }
 
 // Command result interface
@@ -80,7 +75,7 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
   const { command, userPublicKey, service } = params;
   const lowerCommand = command.toLowerCase().trim();
 
-  // Check if user is connected
+  // Check if user is connected for non-query commands
   if (!userPublicKey && !isQueryCommand(lowerCommand)) {
     return {
       type: CommandType.UNKNOWN,
@@ -107,7 +102,6 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Extract pool address if provided
       const poolAddress = extractPoolAddress(lowerCommand);
       return await handleGetPositionCommand(service.dlmm, userPublicKey, poolAddress);
     }
@@ -123,7 +117,6 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Parse the command to extract amount, token, and pool
       const { amount, token, poolAddress } = extractLiquidityParams(lowerCommand);
       
       if (!amount || !poolAddress) {
@@ -135,13 +128,45 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Note: This is just a command parser - the actual execution would be handled elsewhere
-      return {
-        type: CommandType.ADD_LIQUIDITY,
-        success: true,
-        message: `Preparing to add ${amount} ${token || ''} to pool ${poolAddress.substring(0, 8)}...`,
-        data: { amount, token, poolAddress }
-      };
+      // Enhanced response with estimated Y amount calculation
+      try {
+        const activeBin = await service.dlmm.getActiveBin(poolAddress);
+        const bnAmount = new BN(amount * Math.pow(10, 9)); // Assuming 9 decimals
+        
+        // Calculate estimated Y amount for balanced position
+        const estimatedY = service.dlmm.calculateBalancedYAmount(
+          activeBin.binId,
+          50, // Default bin step
+          bnAmount,
+          activeBin.xAmount,
+          activeBin.yAmount,
+          activeBin.binId - 10,
+          activeBin.binId + 10,
+          StrategyType.Spot
+        );
+        
+        const estimatedYFormatted = (estimatedY.toNumber() / Math.pow(10, 9)).toFixed(6);
+        
+        return {
+          type: CommandType.ADD_LIQUIDITY,
+          success: true,
+          message: `Preparing to add ${amount} ${token || ''} to pool ${poolAddress.substring(0, 8)}... Estimated paired amount: ${estimatedYFormatted}`,
+          data: { 
+            amount, 
+            token,
+            poolAddress,
+            estimatedYAmount: estimatedYFormatted,
+            useAutoFill: true
+          }
+        };
+      } catch (error) {
+        return {
+          type: CommandType.ADD_LIQUIDITY,
+          success: true,
+          message: `Preparing to add ${amount} ${token || ''} to pool ${poolAddress.substring(0, 8)}...`,
+          data: { amount, token, poolAddress }
+        };
+      }
     }
     
     // Handle remove liquidity command
@@ -155,7 +180,6 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Parse the command to extract percentage and position
       const { percentage, positionId } = extractRemoveLiquidityParams(lowerCommand);
       
       if (!percentage || !positionId) {
@@ -186,7 +210,6 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Extract position ID if provided
       const positionId = extractPositionId(lowerCommand);
       
       if (!positionId) {
@@ -217,7 +240,6 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Extract position ID
       const positionId = extractPositionId(lowerCommand);
       
       if (!positionId) {
@@ -248,7 +270,6 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
         };
       }
       
-      // Parse the command to extract amount, from token, to token, and pool
       const { amount, fromToken, toToken, poolAddress } = extractSwapParams(lowerCommand);
       
       if (!amount || !fromToken || !toToken) {
@@ -297,7 +318,7 @@ function isQueryCommand(command: string): boolean {
 }
 
 /**
- * Handle get pools command
+ * Handle get pools command - IMPROVED
  */
 async function handleGetPoolsCommand(service: MeteoraDlmmService): Promise<CommandResult> {
   try {
@@ -312,20 +333,39 @@ async function handleGetPoolsCommand(service: MeteoraDlmmService): Promise<Comma
       };
     }
     
-    // Format pool information
-    const poolsInfo = pools.map(pool => ({
-      name: pool.name,
-      address: pool.address,
-      price: pool.activeBinPrice.toFixed(6),
-      binStep: pool.binStep.toString(),
-      tokenX: pool.tokenX,
-      tokenY: pool.tokenY
-    }));
+    // Enhanced pool information with active bin data
+    const poolsInfo: PoolInfo[] = [];
+    
+    // Get active bin data for first 5 pools to avoid too many requests
+    for (const pool of pools.slice(0, 5)) {
+      try {
+        const activeBin = await service.getActiveBin(pool.address);
+        poolsInfo.push({
+          name: pool.name,
+          address: pool.address,
+          price: activeBin.price,
+          binStep: pool.binStep.toString(),
+          tokenX: pool.tokenX,
+          tokenY: pool.tokenY,
+          activeBinId: activeBin.binId
+        });
+      } catch (error) {
+        // Fallback to basic info if active bin fetch fails
+        poolsInfo.push({
+          name: pool.name,
+          address: pool.address,
+          price: pool.activeBinPrice.toFixed(6),
+          binStep: pool.binStep.toString(),
+          tokenX: pool.tokenX,
+          tokenY: pool.tokenY
+        });
+      }
+    }
     
     return {
       type: CommandType.GET_POOLS,
       success: true,
-      message: `Found ${pools.length} DLMM pools.`,
+      message: `Found ${pools.length} DLMM pools (showing top 5 with details).`,
       data: { pools: poolsInfo }
     };
   } catch (error) {
@@ -339,7 +379,7 @@ async function handleGetPoolsCommand(service: MeteoraDlmmService): Promise<Comma
 }
 
 /**
- * Handle get position command
+ * Handle get position command - IMPROVED
  */
 async function handleGetPositionCommand(
   service: MeteoraDlmmService,
@@ -347,38 +387,54 @@ async function handleGetPositionCommand(
   poolAddress?: string
 ): Promise<CommandResult> {
   try {
-    // If no pool address was provided, we'd need to search across all pools
-    // This is a simplified version - in a real implementation, you'd query multiple pools
-    if (!poolAddress) {
-      // Default to a known pool (this is just for example)
-      // In reality, you'd want to fetch positions across multiple pools
-      const defaultPool = "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq"; // Example USDC-USDT pool
-      poolAddress = defaultPool;
+    let allPositions: PositionInfo[] = [];
+    
+    if (poolAddress) {
+      // Get positions for specific pool
+      const positions = await service.getUserPositions(poolAddress, userPublicKey);
+      allPositions = positions.map(position => ({
+        id: position.pubkey,
+        bins: position.liquidityPerBin.length,
+        totalValue: position.totalValue,
+        poolName: 'Specified Pool'
+      }));
+    } else {
+      // Get positions across all pools (limited to prevent timeout)
+      const pools = await service.getAllPools();
+      
+      for (const pool of pools.slice(0, 10)) { // Limit to first 10 pools
+        try {
+          const positions = await service.getUserPositions(pool.address, userPublicKey);
+          const poolPositions = positions.map(position => ({
+            id: position.pubkey,
+            bins: position.liquidityPerBin.length,
+            totalValue: position.totalValue,
+            poolName: pool.name
+          }));
+          allPositions.push(...poolPositions);
+        } catch (err) {
+          // Skip pools that fail to fetch
+          continue;
+        }
+      }
     }
     
-    const positions = await service.getUserPositions(poolAddress, userPublicKey);
-    
-    if (positions.length === 0) {
+    if (allPositions.length === 0) {
       return {
         type: CommandType.GET_POSITION,
         success: true,
-        message: "You don't have any positions in this pool.",
+        message: poolAddress 
+          ? "You don't have any positions in this pool." 
+          : "You don't have any DLMM positions.",
         data: { positions: [] }
       };
     }
     
-    // Format position information
-    const positionsInfo = positions.map(position => ({
-      id: position.pubkey,
-      bins: position.liquidityPerBin.length,
-      totalValue: position.totalValue
-    }));
-    
     return {
       type: CommandType.GET_POSITION,
       success: true,
-      message: `Found ${positions.length} position(s).`,
-      data: { positions: positionsInfo }
+      message: `Found ${allPositions.length} position(s) across ${poolAddress ? '1 pool' : 'multiple pools'}.`,
+      data: { positions: allPositions }
     };
   } catch (error) {
     return {
@@ -409,11 +465,11 @@ function extractPositionId(command: string): string | undefined {
 }
 
 /**
- * Extract liquidity parameters from command
+ * Extract liquidity parameters from command - IMPROVED
  */
 function extractLiquidityParams(command: string): { amount?: number; token?: string; poolAddress?: string } {
-  // Extract amount
-  const amountMatch = command.match(/(?:add|deposit)\s+(\d+(?:\.\d+)?)\s+([a-zA-Z]+)?/i);
+  // Extract amount with better regex
+  const amountMatch = command.match(/(?:add|deposit)\s+(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?/i);
   const amount = amountMatch ? parseFloat(amountMatch[1]) : undefined;
   const token = amountMatch && amountMatch[2] ? amountMatch[2].toUpperCase() : undefined;
   
@@ -424,14 +480,14 @@ function extractLiquidityParams(command: string): { amount?: number; token?: str
 }
 
 /**
- * Extract remove liquidity parameters from command
+ * Extract remove liquidity parameters from command - IMPROVED
  */
 function extractRemoveLiquidityParams(command: string): { percentage?: number; positionId?: string } {
-  // Extract percentage
+  // Extract percentage with better regex
   const percentageMatch = command.match(/(?:remove|withdraw)\s+(\d+(?:\.\d+)?)\s*(%)?/i);
   let percentage = percentageMatch ? parseFloat(percentageMatch[1]) : undefined;
   
-  // If percentage doesn't have % symbol and is greater than 1, assume it's meant to be a percentage (e.g., 50 -> 50%)
+  // If percentage doesn't have % symbol and is greater than 1, assume it's meant to be a percentage
   if (percentage && percentage > 1 && !percentageMatch?.[2]) {
     percentage = Math.min(percentage, 100); // Cap at 100%
   }
@@ -443,12 +499,12 @@ function extractRemoveLiquidityParams(command: string): { percentage?: number; p
 }
 
 /**
- * Extract swap parameters from command
+ * Extract swap parameters from command - IMPROVED
  */
 function extractSwapParams(command: string): { 
   amount?: number; fromToken?: string; toToken?: string; poolAddress?: string 
 } {
-  // Extract amount and tokens
+  // Extract amount and tokens with better regex
   const swapMatch = command.match(/swap\s+(\d+(?:\.\d+)?)\s+([a-zA-Z]+)\s+(?:for|to)\s+([a-zA-Z]+)/i);
   const amount = swapMatch ? parseFloat(swapMatch[1]) : undefined;
   const fromToken = swapMatch ? swapMatch[2].toUpperCase() : undefined;

@@ -1,12 +1,10 @@
 // src/lib/meteora/meteoraPositionService.ts
-import DLMM, { StrategyType } from '@meteora-ag/dlmm';
-import { Connection, PublicKey, Keypair, Transaction} from '@solana/web3.js';
-// import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import DLMM, { StrategyType, autoFillYByStrategy } from '@meteora-ag/dlmm';
+import { Connection, PublicKey, Keypair, Transaction } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
-// Define type alias for the DLMM instance
-// This matches the type definition in meteoraDlmmService.ts for consistency
+// Import types from DLMM service for consistency
 export type DlmmType = DLMM;
 
 // Interface for position creation parameters
@@ -14,10 +12,11 @@ export interface CreatePositionParams {
   poolAddress: string;
   userPublicKey: PublicKey;
   totalXAmount: BN;
-  totalYAmount: BN;
+  totalYAmount?: BN; // Made optional for auto-calculation
   minBinId: number;
   maxBinId: number;
   strategyType: StrategyType;
+  useAutoFill?: boolean; // New option for balanced positions
 }
 
 // Interface for position management parameters
@@ -25,6 +24,14 @@ export interface PositionManagementParams {
   poolAddress: string;
   positionPubkey: string;
   userPublicKey: PublicKey;
+}
+
+// Interface for remove liquidity parameters - FIXED
+export interface RemoveLiquidityParams extends PositionManagementParams {
+  fromBinId: number;
+  toBinId: number;
+  liquiditiesBpsToRemove: BN[];
+  shouldClaimAndClose: boolean;
 }
 
 /**
@@ -40,8 +47,6 @@ export class MeteoraPositionService {
 
   /**
    * Initialize a DLMM pool
-   * @param poolAddress Address of the DLMM pool
-   * @returns Instance of the DLMM pool
    */
   async initializePool(poolAddress: string): Promise<DlmmType> {
     try {
@@ -60,9 +65,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Create a new position with balanced liquidity
-   * @param params Parameters for creating a position
-   * @returns Transaction and new position keypair
+   * Create a new position with balanced liquidity - FIXED
    */
   async createBalancedPosition(params: CreatePositionParams): Promise<{
     transaction: Transaction | Transaction[];
@@ -71,16 +74,41 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
-
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const typedPool = pool as any;
+
+      let totalYAmount = params.totalYAmount || new BN(0);
+
+      // Use autoFillYByStrategy for truly balanced positions
+      if (params.useAutoFill !== false) {
+        try {
+          // Get active bin information
+          const activeBin = await typedPool.getActiveBin();
+          
+          // Calculate balanced Y amount using SDK helper
+          totalYAmount = autoFillYByStrategy(
+            activeBin.binId,
+            typedPool.lbPair.binStep,
+            params.totalXAmount,
+            activeBin.xAmount,
+            activeBin.yAmount,
+            params.minBinId,
+            params.maxBinId,
+            params.strategyType
+          );
+
+          console.log('Auto-calculated balanced Y amount:', totalYAmount.toString());
+        } catch (autoFillError) {
+          console.warn('AutoFill failed, using provided or zero Y amount:', autoFillError);
+          // Fallback to provided amount or zero
+          totalYAmount = params.totalYAmount || new BN(0);
+        }
+      }
 
       const createPositionTx = await typedPool.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: newPosition.publicKey,
         user: params.userPublicKey,
         totalXAmount: params.totalXAmount,
-        totalYAmount: params.totalYAmount,
+        totalYAmount,
         strategy: {
           maxBinId: params.maxBinId,
           minBinId: params.minBinId,
@@ -99,10 +127,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Create a one-sided position (single token)
-   * @param params Parameters for creating a position
-   * @param useTokenX Whether to use token X (true) or token Y (false)
-   * @returns Transaction and new position keypair
+   * Create a one-sided position (single token) - IMPROVED
    */
   async createOneSidedPosition(
     params: CreatePositionParams,
@@ -114,14 +139,22 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
+      const typedPool = pool as any;
       
       // For one-sided position, set either X or Y amount to 0
       const totalXAmount = useTokenX ? params.totalXAmount : new BN(0);
-      const totalYAmount = useTokenX ? new BN(0) : params.totalYAmount;
+      const totalYAmount = useTokenX ? new BN(0) : (params.totalYAmount || params.totalXAmount);
 
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const typedPool = pool as any;
+      // Adjust bin range for one-sided positions
+      let minBinId = params.minBinId;
+      let maxBinId = params.maxBinId;
+
+      if (useTokenX) {
+        // For X token only, position should be above current price
+        const activeBin = await typedPool.getActiveBin();
+        minBinId = activeBin.binId;
+        maxBinId = activeBin.binId + (params.maxBinId - params.minBinId);
+      }
 
       const createPositionTx = await typedPool.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: newPosition.publicKey,
@@ -129,8 +162,8 @@ export class MeteoraPositionService {
         totalXAmount,
         totalYAmount,
         strategy: {
-          maxBinId: params.maxBinId,
-          minBinId: params.minBinId,
+          maxBinId,
+          minBinId,
           strategyType: params.strategyType,
         },
       });
@@ -146,14 +179,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Add liquidity to an existing position
-   * @param params Parameters for position management
-   * @param totalXAmount Amount of token X to add
-   * @param totalYAmount Amount of token Y to add
-   * @param minBinId Minimum bin ID
-   * @param maxBinId Maximum bin ID
-   * @param strategyType Strategy type
-   * @returns Transaction for adding liquidity
+   * Add liquidity to an existing position - IMPROVED
    */
   async addLiquidity(
     params: PositionManagementParams,
@@ -161,22 +187,42 @@ export class MeteoraPositionService {
     totalYAmount: BN,
     minBinId: number,
     maxBinId: number,
-    strategyType: StrategyType
+    strategyType: StrategyType,
+    useAutoFill: boolean = true
   ): Promise<Transaction | Transaction[]> {
     try {
       const pool = await this.initializePool(params.poolAddress);
-      
       const positionPubKey = new PublicKey(params.positionPubkey);
-      
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const typedPool = pool as any;
+      
+      let finalTotalYAmount = totalYAmount;
+
+      // Use autoFillYByStrategy for balanced liquidity addition
+      if (useAutoFill && totalYAmount.isZero()) {
+        try {
+          const activeBin = await typedPool.getActiveBin();
+          
+          finalTotalYAmount = autoFillYByStrategy(
+            activeBin.binId,
+            typedPool.lbPair.binStep,
+            totalXAmount,
+            activeBin.xAmount,
+            activeBin.yAmount,
+            minBinId,
+            maxBinId,
+            strategyType
+          );
+        } catch (autoFillError) {
+          console.warn('AutoFill failed for add liquidity, using zero Y amount:', autoFillError);
+          finalTotalYAmount = new BN(0);
+        }
+      }
       
       const addLiquidityTx = await typedPool.addLiquidityByStrategy({
         positionPubKey,
         user: params.userPublicKey,
         totalXAmount,
-        totalYAmount,
+        totalYAmount: finalTotalYAmount,
         strategy: {
           maxBinId,
           minBinId,
@@ -192,38 +238,24 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Remove liquidity from a position
-   * @param params Parameters for position management
-   * @param fromBinId Starting bin ID to remove liquidity from
-   * @param toBinId Ending bin ID to remove liquidity from
-   * @param percentages Array of percentages to remove from each bin (in basis points, 10000 = 100%)
-   * @param shouldClaimAndClose Whether to claim fees and close the position
-   * @returns Transaction for removing liquidity
+   * Remove liquidity from a position - FIXED
    */
   async removeLiquidity(
-    params: PositionManagementParams,
-    fromBinId: number,
-    toBinId: number,
-    percentages: BN[],
-    shouldClaimAndClose: boolean
+    params: RemoveLiquidityParams
   ): Promise<Transaction | Transaction[]> {
     try {
       const pool = await this.initializePool(params.poolAddress);
-      
       const positionPubKey = new PublicKey(params.positionPubkey);
-      
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const typedPool = pool as any;
       
-      // Update to use fromBinId and toBinId instead of binIds array
+      // Use the correct SDK parameters
       const removeLiquidityTx = await typedPool.removeLiquidity({
         position: positionPubKey,
         user: params.userPublicKey,
-        fromBinId,
-        toBinId,
-        liquiditiesBpsToRemove: percentages,
-        shouldClaimAndClose,
+        fromBinId: params.fromBinId,
+        toBinId: params.toBinId,
+        liquiditiesBpsToRemove: params.liquiditiesBpsToRemove,
+        shouldClaimAndClose: params.shouldClaimAndClose,
       });
 
       return removeLiquidityTx;
@@ -234,18 +266,66 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Claim fees from a position
-   * @param params Parameters for position management
-   * @returns Transaction for claiming fees
+   * Remove liquidity with automatic bin detection - NEW
+   */
+  async removeLiquidityFromPosition(
+    params: PositionManagementParams,
+    percentageToRemove: number = 100,
+    shouldClaimAndClose: boolean = true
+  ): Promise<Transaction | Transaction[]> {
+    try {
+      const pool = await this.initializePool(params.poolAddress);
+      const positionPubKey = new PublicKey(params.positionPubkey);
+      const typedPool = pool as any;
+
+      // Get user positions to find the specific position
+      const { userPositions } = await typedPool.getPositionsByUserAndLbPair(params.userPublicKey);
+      
+      const userPosition = userPositions.find((pos: any) => 
+        pos.publicKey.equals(positionPubKey)
+      );
+
+      if (!userPosition) {
+        throw new Error('Position not found');
+      }
+
+      // Extract bin IDs from position data
+      const binIdsToRemove = userPosition.positionData.positionBinData.map((bin: any) => bin.binId);
+      
+      if (binIdsToRemove.length === 0) {
+        throw new Error('No bins found in position');
+      }
+
+      const fromBinId = Math.min(...binIdsToRemove);
+      const toBinId = Math.max(...binIdsToRemove);
+      
+      // Calculate percentage in basis points (10000 = 100%)
+      const bpsToRemove = new BN(percentageToRemove * 100); // Convert to basis points
+      const liquiditiesBpsToRemove = new Array(binIdsToRemove.length).fill(bpsToRemove);
+
+      const removeLiquidityTx = await typedPool.removeLiquidity({
+        position: positionPubKey,
+        user: params.userPublicKey,
+        fromBinId,
+        toBinId,
+        liquiditiesBpsToRemove,
+        shouldClaimAndClose,
+      });
+
+      return removeLiquidityTx;
+    } catch (error) {
+      console.error('Error removing liquidity from position:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Claim fees from a position - UPDATED
    */
   async claimFees(params: PositionManagementParams): Promise<Transaction> {
     try {
       const pool = await this.initializePool(params.poolAddress);
-      
       const positionPubKey = new PublicKey(params.positionPubkey);
-      
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const typedPool = pool as any;
       
       const claimFeeTx = await typedPool.claimSwapFee({
@@ -261,18 +341,38 @@ export class MeteoraPositionService {
   }
 
   /**
+   * Claim all fees from multiple positions - NEW
+   */
+  async claimAllFees(
+    poolAddress: string,
+    userPublicKey: PublicKey
+  ): Promise<Transaction[]> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      const typedPool = pool as any;
+
+      // Get all user positions
+      const { userPositions } = await typedPool.getPositionsByUserAndLbPair(userPublicKey);
+
+      const claimFeeTxs = await typedPool.claimAllSwapFee({
+        owner: userPublicKey,
+        positions: userPositions,
+      });
+
+      return Array.isArray(claimFeeTxs) ? claimFeeTxs : [claimFeeTxs];
+    } catch (error) {
+      console.error('Error claiming all fees:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Close a position
-   * @param params Parameters for position management
-   * @returns Transaction for closing the position
    */
   async closePosition(params: PositionManagementParams): Promise<Transaction> {
     try {
       const pool = await this.initializePool(params.poolAddress);
-      
       const positionPubKey = new PublicKey(params.positionPubkey);
-      
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const typedPool = pool as any;
       
       const closePositionTx = await typedPool.closePosition({
@@ -286,13 +386,32 @@ export class MeteoraPositionService {
       throw error;
     }
   }
+
+  /**
+   * Get position information - NEW
+   */
+  async getPositionInfo(
+    poolAddress: string,
+    positionPubkey: string
+  ): Promise<any> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      const positionPubKey = new PublicKey(positionPubkey);
+      const typedPool = pool as any;
+
+      const positionInfo = await typedPool.getPosition(positionPubKey);
+      return positionInfo;
+    } catch (error) {
+      console.error('Error getting position info:', error);
+      throw error;
+    }
+  }
 }
 
 // Hook to use the position service
 export function useMeteoraPositionService() {
   const { publicKey, sendTransaction } = useWallet();
   
-  // Use environment variable for RPC URL
   const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
   const connection = new Connection(rpcUrl);
   

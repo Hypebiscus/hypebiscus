@@ -1,14 +1,10 @@
 // src/lib/meteora/meteoraDlmmService.ts
-import DLMM from '@meteora-ag/dlmm';
-// import DLMM, { StrategyType } from '@meteora-ag/dlmm';
-// import { Connection, PublicKey, Keypair, Transaction } from '@solana/web3.js';
+import DLMM, { StrategyType, autoFillYByStrategy } from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 // Define type aliases for the library types
-// Since we need to work with the actual types from the library,
-// we use more specific interfaces to provide better type safety
 export type DlmmType = DLMM;
 
 // Interface for BinArray with known properties
@@ -49,8 +45,8 @@ export interface BinLiquidity {
 export interface DlmmPoolInfo {
   address: string;
   name: string;
-  tokenX: string; // Base token
-  tokenY: string; // Quote token
+  tokenX: string;
+  tokenY: string;
   activeBinPrice: number;
   binStep: number;
   totalXAmount: string;
@@ -69,12 +65,22 @@ export interface DlmmPositionInfo {
   totalValue: number;
 }
 
-// Interface for swap quote
+// Enhanced swap quote interface
 export interface SwapQuote {
   amountIn: string;
   amountOut: string;
+  minOutAmount: string;
   fee: string;
   priceImpact: string;
+  binArraysPubkey: PublicKey[];
+}
+
+// Enhanced active bin interface
+export interface ActiveBin {
+  binId: number;
+  price: string;
+  xAmount: string;
+  yAmount: string;
 }
 
 /**
@@ -97,8 +103,6 @@ export class MeteoraDlmmService {
 
   /**
    * Initialize a DLMM pool
-   * @param poolAddress Address of the DLMM pool
-   * @returns Instance of the DLMM pool
    */
   async initializePool(poolAddress: string): Promise<DlmmType> {
     try {
@@ -117,6 +121,26 @@ export class MeteoraDlmmService {
   }
 
   /**
+   * Initialize multiple pools at once
+   */
+  async initializeMultiplePools(poolAddresses: string[]): Promise<DlmmType[]> {
+    try {
+      const pubkeys = poolAddresses.map(addr => new PublicKey(addr));
+      const pools = await DLMM.createMultiple(this._connection, pubkeys);
+      
+      // Cache the pools
+      pools.forEach((pool, index) => {
+        this.poolInstances.set(poolAddresses[index], pool);
+      });
+      
+      return pools;
+    } catch (error) {
+      console.error('Error initializing multiple Meteora DLMM pools:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all available pools from Meteora API
    */
   async getAllPools(): Promise<DlmmPoolInfo[]> {
@@ -129,7 +153,6 @@ export class MeteoraDlmmService {
       const data = await response.json();
       const pools: DlmmPoolInfo[] = [];
       
-      // Process the API response to extract pool information
       for (const pool of data.pairs || []) {
         pools.push({
           address: pool.address,
@@ -151,26 +174,31 @@ export class MeteoraDlmmService {
   }
 
   /**
-   * Get active bin information for a pool
-   * @param poolAddress Address of the DLMM pool
+   * Get active bin information for a pool - FIXED
    */
-  async getActiveBin(poolAddress: string): Promise<{ binId: number; price: string }> {
-    const pool = await this.initializePool(poolAddress);
-    // Type assertion needed for compatibility with external library
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return await (pool as any).getActiveBin();
+  async getActiveBin(poolAddress: string): Promise<ActiveBin> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      const activeBin = await (pool as any).getActiveBin();
+      
+      return {
+        binId: activeBin.binId,
+        price: activeBin.price,
+        xAmount: activeBin.xAmount?.toString() || '0',
+        yAmount: activeBin.yAmount?.toString() || '0',
+      };
+    } catch (error) {
+      console.error('Error getting active bin:', error);
+      throw error;
+    }
   }
 
   /**
    * Get user positions for a specific pool
-   * @param poolAddress Address of the DLMM pool
-   * @param userPublicKey User's public key
    */
   async getUserPositions(poolAddress: string, userPublicKey: PublicKey): Promise<DlmmPositionInfo[]> {
     try {
       const pool = await this.initializePool(poolAddress);
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { userPositions } = await (pool as any).getPositionsByUserAndLbPair(userPublicKey);
       
       const positions: DlmmPositionInfo[] = [];
@@ -187,7 +215,7 @@ export class MeteoraDlmmService {
         positions.push({
           pubkey: typedPosition.publicKey.toString(),
           liquidityPerBin: bins,
-          totalValue: 0 // You would calculate this based on current prices
+          totalValue: 0 // Calculate based on current prices
         });
       }
       
@@ -199,35 +227,31 @@ export class MeteoraDlmmService {
   }
 
   /**
-   * Get swap quote
-   * @param poolAddress Address of the DLMM pool
-   * @param amountIn Amount to swap
-   * @param swapForY Whether to swap token X for token Y (true) or token Y for token X (false)
+   * Get swap quote - FIXED
    */
   async getSwapQuote(poolAddress: string, amountIn: BN, swapForY: boolean): Promise<SwapQuote> {
     try {
       const pool = await this.initializePool(poolAddress);
-      
-      // Type assertions needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const poolWithMethods = pool as any;
       
       // Get bin arrays for swap
       const binArrays = await poolWithMethods.getBinArrayForSwap(swapForY);
       
-      // Get swap quote
+      // Get swap quote with proper slippage
       const quote = await poolWithMethods.swapQuote(
         amountIn,
         swapForY,
-        new BN(1), // slippage bps (1 = 0.01%)
+        new BN(1), // 0.01% slippage
         binArrays
       );
       
       return {
         amountIn: amountIn.toString(),
-        amountOut: quote.minOutAmount.toString(),
-        fee: quote.fee.toString(),
-        priceImpact: '0' // The actual price impact isn't directly available in the quote
+        amountOut: quote.outAmount?.toString() || '0',
+        minOutAmount: quote.minOutAmount?.toString() || '0',
+        fee: quote.fee?.toString() || '0',
+        priceImpact: quote.priceImpact?.toString() || '0',
+        binArraysPubkey: quote.binArraysPubkey || []
       };
     } catch (error) {
       console.error('Error getting swap quote:', error);
@@ -236,12 +260,7 @@ export class MeteoraDlmmService {
   }
 
   /**
-   * Perform a swap
-   * @param poolAddress Address of the DLMM pool
-   * @param userPublicKey User's public key
-   * @param amountIn Amount to swap
-   * @param minAmountOut Minimum amount to receive
-   * @param swapForY Whether to swap token X for token Y (true) or token Y for token X (false)
+   * Perform a swap - FIXED
    */
   async swap(
     poolAddress: string, 
@@ -252,32 +271,91 @@ export class MeteoraDlmmService {
   ): Promise<Transaction> {
     try {
       const pool = await this.initializePool(poolAddress);
-      
-      // Type assertion needed for compatibility with external library
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const typedPool = pool as any;
       
-      // Determine input and output tokens
-      const inToken = swapForY ? typedPool.tokenX.publicKey : typedPool.tokenY.publicKey;
-      const outToken = swapForY ? typedPool.tokenY.publicKey : typedPool.tokenX.publicKey;
-      
-      // Get bin arrays for swap
+      // Get bin arrays and quote first
       const binArrays = await typedPool.getBinArrayForSwap(swapForY);
+      const swapQuote = await typedPool.swapQuote(amountIn, swapForY, new BN(1), binArrays);
       
-      // Create swap transaction
+      // Create swap transaction using quote data
       const swapTx = await typedPool.swap({
-        inToken,
-        binArraysPubkey: binArrays.map((arr: BinArrayType) => arr.publicKey),
+        inToken: swapForY ? typedPool.tokenX.publicKey : typedPool.tokenY.publicKey,
+        binArraysPubkey: swapQuote.binArraysPubkey,
         inAmount: amountIn,
         lbPair: typedPool.pubkey,
         user: userPublicKey,
         minOutAmount: minAmountOut,
-        outToken,
+        outToken: swapForY ? typedPool.tokenY.publicKey : typedPool.tokenX.publicKey,
       });
       
       return swapTx;
     } catch (error) {
       console.error('Error creating swap transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate balanced Y amount using SDK helper - FIXED BN TYPES
+   */
+  calculateBalancedYAmount(
+    activeBinId: number,
+    binStep: number,
+    totalXAmount: BN,
+    activeBinXAmount: string,
+    activeBinYAmount: string,
+    minBinId: number,
+    maxBinId: number,
+    strategyType: StrategyType
+  ): BN {
+    try {
+      // Convert string amounts to BN as required by autoFillYByStrategy
+      const activeBinXAmountBN = new BN(activeBinXAmount || '0');
+      const activeBinYAmountBN = new BN(activeBinYAmount || '0');
+      
+      return autoFillYByStrategy(
+        activeBinId,
+        binStep,
+        totalXAmount,
+        activeBinXAmountBN,  // ✅ Fixed: Convert string to BN
+        activeBinYAmountBN,  // ✅ Fixed: Convert string to BN
+        minBinId,
+        maxBinId,
+        strategyType
+      );
+    } catch (error) {
+      console.error('Error calculating balanced Y amount:', error);
+      // Fallback to zero if calculation fails
+      return new BN(0);
+    }
+  }
+
+  /**
+   * Update pool state - NEW
+   */
+  async updatePoolState(poolAddress: string): Promise<void> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      await (pool as any).refetchStates();
+    } catch (error) {
+      console.error('Error updating pool state:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get bins in range - NEW
+   */
+  async getBinsInRange(
+    poolAddress: string, 
+    lowerBinId: number, 
+    upperBinId: number
+  ): Promise<{ activeBin: number; bins: BinLiquidity[] }> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      return await (pool as any).getBins(lowerBinId, upperBinId);
+    } catch (error) {
+      console.error('Error getting bins in range:', error);
       throw error;
     }
   }
@@ -287,7 +365,6 @@ export class MeteoraDlmmService {
 export function useMeteoraDlmmService() {
   const { publicKey, sendTransaction } = useWallet();
   
-  // Use environment variable for RPC URL
   const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
   const connection = new Connection(rpcUrl);
   
