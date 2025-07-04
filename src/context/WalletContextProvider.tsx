@@ -1,9 +1,14 @@
+// Optimized WalletContextProvider.tsx to remove redundant adapters
+
 'use client'
 
 import { FC, ReactNode, useMemo } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
-import { PhantomWalletAdapter, SolflareWalletAdapter, TorusWalletAdapter } from '@solana/wallet-adapter-wallets'
+import { 
+  // Remove PhantomWalletAdapter and SolflareWalletAdapter since they're now Standard Wallets
+  TorusWalletAdapter 
+} from '@solana/wallet-adapter-wallets'
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui'
 import { clusterApiUrl } from '@solana/web3.js'
 
@@ -32,11 +37,12 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
   console.log(`Using Solana network: ${network}`);
   console.log(`Using RPC endpoint: ${endpoint.split('/').slice(0, 3).join('/')}/...`); // Log only domain part for security
   
-  // @solana/wallet-adapter-wallets includes all the adapters but supports tree shaking
+  // Only include non-Standard Wallet adapters
+  // Phantom and Solflare are now Standard Wallets and will be auto-detected
   const wallets = useMemo(
     () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({ network }),
+      // Remove PhantomWalletAdapter and SolflareWalletAdapter
+      // They're now automatically detected as Standard Wallets
       new TorusWalletAdapter()
     ],
     [network]
@@ -44,7 +50,15 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
 
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect>
+      <WalletProvider 
+        wallets={wallets} 
+        autoConnect
+        onError={(error) => {
+          // Handle wallet connection errors more gracefully
+          console.warn('Wallet connection error:', error.message);
+          // Don't throw the error, just log it
+        }}
+      >
         <WalletModalProvider>
           {children}
         </WalletModalProvider>

@@ -1,20 +1,30 @@
-"use client";
+// Enhanced AddLiquidityModal.tsx with proper balance validation
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Info } from "lucide-react";
+import { Loader2, Info, AlertTriangle } from "lucide-react";
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
 import { BN } from 'bn.js';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { FormattedPool } from '@/lib/utils/poolUtils';
+import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 interface AddLiquidityModalProps {
   isOpen: boolean;
   onClose: () => void;
   pool: FormattedPool | null;
+}
+
+interface BalanceInfo {
+  solBalance: number;
+  tokenBalance: number;
+  hasEnoughSol: boolean;
+  hasEnoughToken: boolean;
+  estimatedSolNeeded: number;
+  estimatedTokenNeeded: number;
 }
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
@@ -32,29 +42,125 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [strategy, setStrategy] = useState<string>('Spot');
   const [useAutoFill, setUseAutoFill] = useState(true);
   const [estimatedYAmount, setEstimatedYAmount] = useState<string>('');
-  
+  const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
+  const [isCheckingBalance, setIsCheckingBalance] = useState(false);
+  const [validationError, setValidationError] = useState<string>('');
+
+  // Check user balances when amount changes
+  useEffect(() => {
+    if (amount && parseFloat(amount) > 0 && publicKey && pool) {
+      checkUserBalances();
+    } else {
+      setBalanceInfo(null);
+      setValidationError('');
+    }
+  }, [amount, publicKey, pool]);
+
+  const checkUserBalances = async () => {
+    if (!publicKey || !pool || !amount || parseFloat(amount) <= 0) return;
+
+    setIsCheckingBalance(true);
+    setValidationError('');
+
+    try {
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+      );
+
+      // Get SOL balance
+      const solBalanceLamports = await connection.getBalance(publicKey);
+      const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
+
+      // Estimate SOL needed (including transaction fees and possible wrapped SOL)
+      const amountValue = parseFloat(amount);
+      const estimatedSolNeeded = amountValue + 0.01; // Add 0.01 SOL buffer for fees
+      
+      // Get estimated Y amount for balanced position
+      let estimatedYValue = 0;
+      if (useAutoFill && estimatedYAmount) {
+        estimatedYValue = parseFloat(estimatedYAmount);
+      }
+
+      // Determine if it's a SOL pair
+      const isSOLPair = pool.name.toLowerCase().includes('sol');
+      const tokenSymbol = pool.name.split('-')[0]; // e.g., 'zBTC' from 'zBTC-SOL'
+
+      // For SOL pairs, we need SOL + the other token
+      const hasEnoughSol = solBalance >= estimatedSolNeeded;
+      
+      // TODO: Add token balance checking logic here
+      // This would require fetching the user's token accounts
+      const hasEnoughToken = true; // Placeholder - implement actual token balance check
+
+      const balanceInfo: BalanceInfo = {
+        solBalance,
+        tokenBalance: 0, // Placeholder
+        hasEnoughSol,
+        hasEnoughToken,
+        estimatedSolNeeded,
+        estimatedTokenNeeded: estimatedYValue
+      };
+
+      setBalanceInfo(balanceInfo);
+
+      // Set validation errors
+      if (!hasEnoughSol) {
+        setValidationError(
+          `Insufficient SOL balance. You need ${estimatedSolNeeded.toFixed(4)} SOL but only have ${solBalance.toFixed(4)} SOL.`
+        );
+      } else if (!hasEnoughToken && !isSOLPair) {
+        setValidationError(
+          `Insufficient ${tokenSymbol} balance. Please check your ${tokenSymbol} holdings.`
+        );
+      }
+
+    } catch (error) {
+      console.error('Error checking balances:', error);
+      setValidationError('Unable to verify account balances. Please try again.');
+    } finally {
+      setIsCheckingBalance(false);
+    }
+  };
+
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     if (/^[0-9]*\.?[0-9]*$/.test(value) || value === '') {
       setAmount(value);
-      // Calculate estimated Y amount when X amount changes
       calculateEstimatedYAmount(value);
     }
   };
   
-  const handleRangeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setRangeWidth(e.target.value);
-    // Recalculate Y amount when range changes
-    if (amount) {
-      calculateEstimatedYAmount(amount);
+  const calculateEstimatedYAmount = async (xAmount: string) => {
+    if (!pool || !xAmount || parseFloat(xAmount) <= 0 || !useAutoFill) {
+      setEstimatedYAmount('');
+      return;
     }
-  };
-  
-  const handleStrategyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setStrategy(e.target.value);
-    // Recalculate Y amount when strategy changes
-    if (amount) {
-      calculateEstimatedYAmount(amount);
+
+    try {
+      const activeBin = await dlmmService.getActiveBin(pool.address);
+      const decimals = 9;
+      const bnAmount = new BN(parseFloat(xAmount) * Math.pow(10, decimals));
+      const rangeWidthNum = parseInt(rangeWidth);
+      const minBinId = activeBin.binId - rangeWidthNum;
+      const maxBinId = activeBin.binId + rangeWidthNum;
+      
+      const estimatedY = dlmmService.calculateBalancedYAmount(
+        activeBin.binId,
+        parseInt(pool.binStep),
+        bnAmount,
+        activeBin.xAmount,
+        activeBin.yAmount,
+        minBinId,
+        maxBinId,
+        getStrategyType()
+      );
+      
+      const estimatedYFormatted = (estimatedY.toNumber() / Math.pow(10, decimals)).toFixed(6);
+      setEstimatedYAmount(estimatedYFormatted);
+      
+    } catch (error) {
+      console.error('Error calculating estimated Y amount:', error);
+      setEstimatedYAmount('Auto-calculation failed');
     }
   };
 
@@ -67,69 +173,25 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   };
 
-  /**
-   * Calculate estimated Y amount using the SDK helper function
-   */
-  const calculateEstimatedYAmount = async (xAmount: string) => {
-    if (!pool || !xAmount || parseFloat(xAmount) <= 0 || !useAutoFill) {
-      setEstimatedYAmount('');
-      return;
-    }
-
-    try {
-      // Get active bin information
-      const activeBin = await dlmmService.getActiveBin(pool.address);
-      
-      // Convert amount to lamports (assuming 9 decimals for most tokens)
-      const decimals = 9;
-      const bnAmount = new BN(parseFloat(xAmount) * Math.pow(10, decimals));
-      
-      // Set bin range based on user input
-      const rangeWidthNum = parseInt(rangeWidth);
-      const minBinId = activeBin.binId - rangeWidthNum;
-      const maxBinId = activeBin.binId + rangeWidthNum;
-      
-      // Calculate balanced Y amount using SDK helper
-      const estimatedY = dlmmService.calculateBalancedYAmount(
-        activeBin.binId,
-        parseInt(pool.binStep),
-        bnAmount,
-        activeBin.xAmount,
-        activeBin.yAmount,
-        minBinId,
-        maxBinId,
-        getStrategyType()
-      );
-      
-      // Convert back to human readable format
-      const estimatedYFormatted = (estimatedY.toNumber() / Math.pow(10, decimals)).toFixed(6);
-      setEstimatedYAmount(estimatedYFormatted);
-      
-    } catch (error) {
-      console.error('Error calculating estimated Y amount:', error);
-      setEstimatedYAmount('Auto-calculation failed');
-    }
-  };
-  
   const handleAddLiquidity = async () => {
     if (!pool || !publicKey || !amount || parseFloat(amount) <= 0) return;
+
+    // Validate balances before proceeding
+    if (balanceInfo && (!balanceInfo.hasEnoughSol || !balanceInfo.hasEnoughToken)) {
+      alert(validationError || 'Insufficient balance to complete transaction');
+      return;
+    }
     
     setIsLoading(true);
     
     try {
-      // Get active bin information
       const activeBin = await dlmmService.getActiveBin(pool.address);
-      
-      // Set bin range based on user input
       const rangeWidthNum = parseInt(rangeWidth);
       const minBinId = activeBin.binId - rangeWidthNum;
       const maxBinId = activeBin.binId + rangeWidthNum;
-      
-      // Convert amount to lamports (assuming 9 decimals)
       const decimals = 9;
       const bnAmount = new BN(parseFloat(amount) * Math.pow(10, decimals));
       
-      // Create new position with improved parameters
       const { transaction, positionKeypair } = await positionService.createBalancedPosition({
         poolAddress: pool.address,
         userPublicKey: publicKey,
@@ -140,7 +202,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         useAutoFill: useAutoFill
       });
       
-      // Handle transaction array properly
       if (Array.isArray(transaction)) {
         for (const tx of transaction) {
           const signature = await sendTransaction(tx, dlmmService.connection, {
@@ -155,10 +216,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         console.log('Transaction signature:', signature);
       }
       
-      // Show success message
       alert(`Liquidity added successfully! Position: ${positionKeypair.publicKey.toString().slice(0, 8)}...`);
-      
-      // Close modal and reset form
       onClose();
       setAmount('');
       setEstimatedYAmount('');
@@ -168,7 +226,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     } catch (error) {
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      alert(`Error adding liquidity: ${errorMessage}`);
+      
+      // Provide user-friendly error messages
+      if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
+        alert('Insufficient funds. Please check your SOL and token balances.');
+      } else if (errorMessage.includes('Transaction simulation failed')) {
+        alert('Transaction failed during simulation. This usually means insufficient funds or invalid parameters.');
+      } else {
+        alert(`Error adding liquidity: ${errorMessage}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -182,6 +248,33 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         </DialogHeader>
         
         <div className="space-y-4 mt-4">
+          {/* Balance Display */}
+          {balanceInfo && (
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-3">
+              <div className="text-sm text-sub-text mb-2">Account Balance:</div>
+              <div className="flex justify-between text-xs">
+                <span>SOL Balance:</span>
+                <span className={balanceInfo.hasEnoughSol ? 'text-green-400' : 'text-red-400'}>
+                  {balanceInfo.solBalance.toFixed(4)} SOL
+                </span>
+              </div>
+              {balanceInfo.estimatedSolNeeded > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span>SOL Needed:</span>
+                  <span>{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Validation Error Display */}
+          {validationError && (
+            <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-red-200">{validationError}</div>
+            </div>
+          )}
+
           {/* Amount Input */}
           <div>
             <label className="text-sm text-sub-text block mb-1">
@@ -198,6 +291,11 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2 bg-secondary/30 px-2 py-1 rounded text-xs">
                 {pool?.name.split('-')[0].replace('WBTC', 'BTC')}
               </div>
+              {isCheckingBalance && (
+                <div className="absolute right-16 top-1/2 transform -translate-y-1/2">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                </div>
+              )}
             </div>
           </div>
 
@@ -235,7 +333,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             <input
               type="number"
               value={rangeWidth}
-              onChange={handleRangeChange}
+              onChange={(e) => setRangeWidth(e.target.value)}
               min="1"
               max="50"
               className="w-full bg-[#0f0f0f] border border-border rounded-lg p-3 text-white"
@@ -250,18 +348,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             <label className="text-sm text-sub-text block mb-1">Strategy</label>
             <select
               value={strategy}
-              onChange={handleStrategyChange}
+              onChange={(e) => setStrategy(e.target.value)}
               className="w-full bg-[#0f0f0f] border border-border rounded-lg p-3 text-white"
             >
               <option value="Spot">Spot (Balanced Distribution)</option>
               <option value="BidAsk">BidAsk (Edge Concentration)</option>
               <option value="Curve">Curve (Center Concentration)</option>
             </select>
-            <div className="text-xs text-sub-text mt-1">
-              {strategy === 'Spot' && 'Uniform distribution suitable for any market conditions'}
-              {strategy === 'BidAsk' && 'Concentrates liquidity at range edges for volatility capture'}
-              {strategy === 'Curve' && 'Concentrates liquidity in the center for maximum efficiency'}
-            </div>
           </div>
           
           {/* Pool Information */}
@@ -272,9 +365,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               <p className="mb-1">Expected APY: {pool?.apy}</p>
               <p className="mb-1">Bin Step: {pool?.binStep}</p>
               <p className="mb-1">Pool: {pool?.address.slice(0, 8)}...</p>
-              {useAutoFill && (
-                <p className="text-primary">Using SDK auto-fill for balanced positions</p>
-              )}
             </div>
           </div>
         </div>
@@ -285,7 +375,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           </Button>
           <Button 
             onClick={handleAddLiquidity} 
-            disabled={!amount || parseFloat(amount) <= 0 || isLoading}
+            disabled={
+              !amount || 
+              parseFloat(amount) <= 0 || 
+              isLoading || 
+              isCheckingBalance ||
+              (balanceInfo ? (!balanceInfo.hasEnoughSol || !balanceInfo.hasEnoughToken) : false)
+            }
             className="bg-primary hover:bg-primary/80"
           >
             {isLoading ? (

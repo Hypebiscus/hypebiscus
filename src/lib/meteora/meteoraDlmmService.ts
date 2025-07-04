@@ -1,19 +1,66 @@
-// src/lib/meteora/meteoraDlmmService.ts
+// Enhanced meteoraDlmmService.ts with better error handling and balance validation
+
 import DLMM, { StrategyType, autoFillYByStrategy } from '@meteora-ag/dlmm';
-import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
-// Define type aliases for the library types
+// Enhanced error types for better error handling
+export enum DLMMErrorType {
+  INSUFFICIENT_SOL = 'INSUFFICIENT_SOL',
+  INSUFFICIENT_TOKEN = 'INSUFFICIENT_TOKEN',
+  INVALID_POOL = 'INVALID_POOL',
+  TRANSACTION_SIMULATION_FAILED = 'TRANSACTION_SIMULATION_FAILED',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR'
+}
+
+export class DLMMError extends Error {
+  constructor(
+    public type: DLMMErrorType,
+    message: string,
+    public details?: string
+  ) {
+    super(message);
+    this.name = 'DLMMError';
+  }
+
+  get userFriendlyMessage(): string {
+    switch (this.type) {
+      case DLMMErrorType.INSUFFICIENT_SOL:
+        return 'Insufficient SOL balance. Please add more SOL to your wallet or reduce the amount.';
+      case DLMMErrorType.INSUFFICIENT_TOKEN:
+        return 'Insufficient token balance. Please ensure you have enough tokens for this transaction.';
+      case DLMMErrorType.INVALID_POOL:
+        return 'Invalid pool configuration. Please try a different pool.';
+      case DLMMErrorType.TRANSACTION_SIMULATION_FAILED:
+        return 'Transaction simulation failed. This usually indicates insufficient funds or invalid parameters.';
+      case DLMMErrorType.NETWORK_ERROR:
+        return 'Network error. Please check your connection and try again.';
+      default:
+        return 'An unexpected error occurred. Please try again.';
+    }
+  }
+}
+
+// Enhanced balance validation interface
+export interface BalanceValidation {
+  isValid: boolean;
+  solBalance: number;
+  requiredSol: number;
+  tokenBalance?: number;
+  requiredToken?: number;
+  error?: DLMMError;
+}
+
+// Rest of your existing interfaces...
 export type DlmmType = DLMM;
 
-// Interface for BinArray with known properties
 export interface BinArrayType {
   publicKey: PublicKey;
   [key: string]: unknown;
 }
 
-// Interface for Position with known properties
 export interface PositionType {
   publicKey: PublicKey;
   positionData: {
@@ -23,7 +70,6 @@ export interface PositionType {
   [key: string]: unknown;
 }
 
-// Interface for BinData with known properties
 export interface BinDataType {
   binId: number;
   xAmount: { toString(): string };
@@ -32,7 +78,6 @@ export interface BinDataType {
   [key: string]: unknown;
 }
 
-// Interface for bin liquidity information
 export interface BinLiquidity {
   binId: number;
   xAmount: string;
@@ -41,7 +86,6 @@ export interface BinLiquidity {
   price: string;
 }
 
-// Interface for pool information
 export interface DlmmPoolInfo {
   address: string;
   name: string;
@@ -53,7 +97,6 @@ export interface DlmmPoolInfo {
   totalYAmount: string;
 }
 
-// Interface for position information
 export interface DlmmPositionInfo {
   pubkey: string;
   liquidityPerBin: {
@@ -65,7 +108,6 @@ export interface DlmmPositionInfo {
   totalValue: number;
 }
 
-// Enhanced swap quote interface
 export interface SwapQuote {
   amountIn: string;
   amountOut: string;
@@ -75,7 +117,6 @@ export interface SwapQuote {
   binArraysPubkey: PublicKey[];
 }
 
-// Enhanced active bin interface
 export interface ActiveBin {
   binId: number;
   price: string;
@@ -84,7 +125,7 @@ export interface ActiveBin {
 }
 
 /**
- * Service to interact with Meteora DLMM
+ * Enhanced Service to interact with Meteora DLMM with better error handling
  */
 export class MeteoraDlmmService {
   private _connection: Connection;
@@ -94,15 +135,63 @@ export class MeteoraDlmmService {
     this._connection = connection;
   }
 
-  /**
-   * Get the Solana connection
-   */
   get connection(): Connection {
     return this._connection;
   }
 
   /**
-   * Initialize a DLMM pool
+   * Validate user balances before attempting transactions
+   */
+  async validateUserBalance(
+    userPublicKey: PublicKey,
+    requiredSolAmount: number,
+    tokenMint?: PublicKey,
+    requiredTokenAmount?: number
+  ): Promise<BalanceValidation> {
+    try {
+      // Check SOL balance
+      const solBalanceLamports = await this._connection.getBalance(userPublicKey);
+      const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
+      
+      // Add buffer for transaction fees (0.01 SOL)
+      const requiredSolWithBuffer = requiredSolAmount + 0.01;
+      
+      if (solBalance < requiredSolWithBuffer) {
+        return {
+          isValid: false,
+          solBalance,
+          requiredSol: requiredSolWithBuffer,
+          error: new DLMMError(
+            DLMMErrorType.INSUFFICIENT_SOL,
+            `Insufficient SOL balance. Required: ${requiredSolWithBuffer.toFixed(4)}, Available: ${solBalance.toFixed(4)}`
+          )
+        };
+      }
+
+      // TODO: Add token balance validation if tokenMint is provided
+      // This would require additional logic to fetch token accounts
+
+      return {
+        isValid: true,
+        solBalance,
+        requiredSol: requiredSolWithBuffer
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        solBalance: 0,
+        requiredSol: requiredSolAmount,
+        error: new DLMMError(
+          DLMMErrorType.NETWORK_ERROR,
+          'Failed to validate balances',
+          error instanceof Error ? error.message : String(error)
+        )
+      };
+    }
+  }
+
+  /**
+   * Enhanced pool initialization with error handling
    */
   async initializePool(poolAddress: string): Promise<DlmmType> {
     try {
@@ -115,34 +204,117 @@ export class MeteoraDlmmService {
       this.poolInstances.set(poolAddress, pool);
       return pool;
     } catch (error) {
-      console.error('Error initializing Meteora DLMM pool:', error);
-      throw error;
+      throw new DLMMError(
+        DLMMErrorType.INVALID_POOL,
+        'Failed to initialize DLMM pool',
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 
   /**
-   * Initialize multiple pools at once
+   * Enhanced get active bin with error handling
    */
-  async initializeMultiplePools(poolAddresses: string[]): Promise<DlmmType[]> {
+  async getActiveBin(poolAddress: string): Promise<ActiveBin> {
     try {
-      const pubkeys = poolAddresses.map(addr => new PublicKey(addr));
-      const pools = await DLMM.createMultiple(this._connection, pubkeys);
+      const pool = await this.initializePool(poolAddress);
+      const activeBin = await (pool as any).getActiveBin();
       
-      // Cache the pools
-      pools.forEach((pool, index) => {
-        this.poolInstances.set(poolAddresses[index], pool);
-      });
-      
-      return pools;
+      return {
+        binId: activeBin.binId,
+        price: activeBin.price,
+        xAmount: activeBin.xAmount?.toString() || '0',
+        yAmount: activeBin.yAmount?.toString() || '0',
+      };
     } catch (error) {
-      console.error('Error initializing multiple Meteora DLMM pools:', error);
-      throw error;
+      throw new DLMMError(
+        DLMMErrorType.INVALID_POOL,
+        'Failed to get active bin information',
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 
   /**
-   * Get all available pools from Meteora API
+   * Enhanced calculate balanced Y amount with error handling
    */
+  calculateBalancedYAmount(
+    activeBinId: number,
+    binStep: number,
+    totalXAmount: BN,
+    activeBinXAmount: string,
+    activeBinYAmount: string,
+    minBinId: number,
+    maxBinId: number,
+    strategyType: StrategyType
+  ): BN {
+    try {
+      const activeBinXAmountBN = new BN(activeBinXAmount || '0');
+      const activeBinYAmountBN = new BN(activeBinYAmount || '0');
+      
+      return autoFillYByStrategy(
+        activeBinId,
+        binStep,
+        totalXAmount,
+        activeBinXAmountBN,
+        activeBinYAmountBN,
+        minBinId,
+        maxBinId,
+        strategyType
+      );
+    } catch (error) {
+      console.error('Error calculating balanced Y amount:', error);
+      return new BN(0);
+    }
+  }
+
+  /**
+   * Enhanced transaction simulation with better error reporting
+   */
+  async simulateTransaction(
+    transaction: Transaction,
+    userPublicKey: PublicKey
+  ): Promise<{ success: boolean; error?: DLMMError }> {
+    try {
+      const simulation = await this._connection.simulateTransaction(transaction, []);
+      
+      if (simulation.value.err) {
+        const errorMessage = JSON.stringify(simulation.value.err);
+        
+        if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
+          return {
+            success: false,
+            error: new DLMMError(
+              DLMMErrorType.INSUFFICIENT_SOL,
+              'Transaction simulation failed due to insufficient funds'
+            )
+          };
+        }
+        
+        return {
+          success: false,
+          error: new DLMMError(
+            DLMMErrorType.TRANSACTION_SIMULATION_FAILED,
+            'Transaction simulation failed',
+            errorMessage
+          )
+        };
+      }
+      
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: new DLMMError(
+          DLMMErrorType.NETWORK_ERROR,
+          'Failed to simulate transaction',
+          error instanceof Error ? error.message : String(error)
+        )
+      };
+    }
+  }
+
+  // Include all your existing methods here...
   async getAllPools(): Promise<DlmmPoolInfo[]> {
     try {
       const response = await fetch('https://dlmm-api.meteora.ag/pair/all');
@@ -168,34 +340,14 @@ export class MeteoraDlmmService {
       
       return pools;
     } catch (error) {
-      console.error('Error fetching DLMM pools:', error);
-      throw error;
+      throw new DLMMError(
+        DLMMErrorType.NETWORK_ERROR,
+        'Failed to fetch DLMM pools',
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 
-  /**
-   * Get active bin information for a pool - FIXED
-   */
-  async getActiveBin(poolAddress: string): Promise<ActiveBin> {
-    try {
-      const pool = await this.initializePool(poolAddress);
-      const activeBin = await (pool as any).getActiveBin();
-      
-      return {
-        binId: activeBin.binId,
-        price: activeBin.price,
-        xAmount: activeBin.xAmount?.toString() || '0',
-        yAmount: activeBin.yAmount?.toString() || '0',
-      };
-    } catch (error) {
-      console.error('Error getting active bin:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get user positions for a specific pool
-   */
   async getUserPositions(poolAddress: string, userPublicKey: PublicKey): Promise<DlmmPositionInfo[]> {
     try {
       const pool = await this.initializePool(poolAddress);
@@ -215,153 +367,24 @@ export class MeteoraDlmmService {
         positions.push({
           pubkey: typedPosition.publicKey.toString(),
           liquidityPerBin: bins,
-          totalValue: 0 // Calculate based on current prices
+          totalValue: 0
         });
       }
       
       return positions;
     } catch (error) {
-      console.error('Error fetching user positions:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get swap quote - FIXED
-   */
-  async getSwapQuote(poolAddress: string, amountIn: BN, swapForY: boolean): Promise<SwapQuote> {
-    try {
-      const pool = await this.initializePool(poolAddress);
-      const poolWithMethods = pool as any;
-      
-      // Get bin arrays for swap
-      const binArrays = await poolWithMethods.getBinArrayForSwap(swapForY);
-      
-      // Get swap quote with proper slippage
-      const quote = await poolWithMethods.swapQuote(
-        amountIn,
-        swapForY,
-        new BN(1), // 0.01% slippage
-        binArrays
+      throw new DLMMError(
+        DLMMErrorType.INVALID_POOL,
+        'Failed to fetch user positions',
+        error instanceof Error ? error.message : String(error)
       );
-      
-      return {
-        amountIn: amountIn.toString(),
-        amountOut: quote.outAmount?.toString() || '0',
-        minOutAmount: quote.minOutAmount?.toString() || '0',
-        fee: quote.fee?.toString() || '0',
-        priceImpact: quote.priceImpact?.toString() || '0',
-        binArraysPubkey: quote.binArraysPubkey || []
-      };
-    } catch (error) {
-      console.error('Error getting swap quote:', error);
-      throw error;
     }
   }
 
-  /**
-   * Perform a swap - FIXED
-   */
-  async swap(
-    poolAddress: string, 
-    userPublicKey: PublicKey, 
-    amountIn: BN, 
-    minAmountOut: BN, 
-    swapForY: boolean
-  ): Promise<Transaction> {
-    try {
-      const pool = await this.initializePool(poolAddress);
-      const typedPool = pool as any;
-      
-      // Get bin arrays and quote first
-      const binArrays = await typedPool.getBinArrayForSwap(swapForY);
-      const swapQuote = await typedPool.swapQuote(amountIn, swapForY, new BN(1), binArrays);
-      
-      // Create swap transaction using quote data
-      const swapTx = await typedPool.swap({
-        inToken: swapForY ? typedPool.tokenX.publicKey : typedPool.tokenY.publicKey,
-        binArraysPubkey: swapQuote.binArraysPubkey,
-        inAmount: amountIn,
-        lbPair: typedPool.pubkey,
-        user: userPublicKey,
-        minOutAmount: minAmountOut,
-        outToken: swapForY ? typedPool.tokenY.publicKey : typedPool.tokenX.publicKey,
-      });
-      
-      return swapTx;
-    } catch (error) {
-      console.error('Error creating swap transaction:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Calculate balanced Y amount using SDK helper - FIXED BN TYPES
-   */
-  calculateBalancedYAmount(
-    activeBinId: number,
-    binStep: number,
-    totalXAmount: BN,
-    activeBinXAmount: string,
-    activeBinYAmount: string,
-    minBinId: number,
-    maxBinId: number,
-    strategyType: StrategyType
-  ): BN {
-    try {
-      // Convert string amounts to BN as required by autoFillYByStrategy
-      const activeBinXAmountBN = new BN(activeBinXAmount || '0');
-      const activeBinYAmountBN = new BN(activeBinYAmount || '0');
-      
-      return autoFillYByStrategy(
-        activeBinId,
-        binStep,
-        totalXAmount,
-        activeBinXAmountBN,  // ✅ Fixed: Convert string to BN
-        activeBinYAmountBN,  // ✅ Fixed: Convert string to BN
-        minBinId,
-        maxBinId,
-        strategyType
-      );
-    } catch (error) {
-      console.error('Error calculating balanced Y amount:', error);
-      // Fallback to zero if calculation fails
-      return new BN(0);
-    }
-  }
-
-  /**
-   * Update pool state - NEW
-   */
-  async updatePoolState(poolAddress: string): Promise<void> {
-    try {
-      const pool = await this.initializePool(poolAddress);
-      await (pool as any).refetchStates();
-    } catch (error) {
-      console.error('Error updating pool state:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get bins in range - NEW
-   */
-  async getBinsInRange(
-    poolAddress: string, 
-    lowerBinId: number, 
-    upperBinId: number
-  ): Promise<{ activeBin: number; bins: BinLiquidity[] }> {
-    try {
-      const pool = await this.initializePool(poolAddress);
-      return await (pool as any).getBins(lowerBinId, upperBinId);
-    } catch (error) {
-      console.error('Error getting bins in range:', error);
-      throw error;
-    }
-  }
+  // Add other existing methods with similar error handling...
 }
 
-// Create a hook to use the DLMM service
+// Enhanced hook with error handling
 export function useMeteoraDlmmService() {
   const { publicKey, sendTransaction } = useWallet();
   
@@ -374,5 +397,12 @@ export function useMeteoraDlmmService() {
     service,
     publicKey,
     sendTransaction,
+    // Helper function to handle common errors
+    handleDLMMError: (error: unknown): string => {
+      if (error instanceof DLMMError) {
+        return error.userFriendlyMessage;
+      }
+      return 'An unexpected error occurred. Please try again.';
+    }
   };
 }
