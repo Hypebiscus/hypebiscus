@@ -1,13 +1,13 @@
-// src/lib/meteora/meteoraPositionService.ts
+// Enhanced meteoraPositionService.ts with cost estimation and better error handling
 import DLMM, { StrategyType, autoFillYByStrategy } from '@meteora-ag/dlmm';
-import { Connection, PublicKey, Keypair, Transaction } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 // Import types from DLMM service for consistency
 export type DlmmType = DLMM;
 
-// Interface for position creation parameters
+// Enhanced interface for position creation parameters
 export interface CreatePositionParams {
   poolAddress: string;
   userPublicKey: PublicKey;
@@ -26,7 +26,7 @@ export interface PositionManagementParams {
   userPublicKey: PublicKey;
 }
 
-// Interface for remove liquidity parameters - FIXED
+// Enhanced interface for remove liquidity parameters
 export interface RemoveLiquidityParams extends PositionManagementParams {
   fromBinId: number;
   toBinId: number;
@@ -34,8 +34,28 @@ export interface RemoveLiquidityParams extends PositionManagementParams {
   shouldClaimAndClose: boolean;
 }
 
+// New interface for cost estimation
+export interface CostEstimation {
+  positionRent: number;
+  binArrayCost: number;
+  transactionFees: number;
+  total: number;
+  breakdown: {
+    newBinArraysNeeded: number;
+    existingBinArrays: number;
+    estimatedComputeUnits: number;
+  };
+}
+
+// Enhanced interface for position creation result
+export interface CreatePositionResult {
+  transaction: Transaction | Transaction[];
+  positionKeypair: Keypair;
+  estimatedCost: CostEstimation;
+}
+
 /**
- * Service for managing DLMM positions
+ * Enhanced Service for managing DLMM positions with cost estimation
  */
 export class MeteoraPositionService {
   private connection: Connection;
@@ -65,13 +85,162 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Create a new position with balanced liquidity - FIXED
+   * Check if binArrays exist for a given range and estimate creation costs
    */
-  async createBalancedPosition(params: CreatePositionParams): Promise<{
-    transaction: Transaction | Transaction[];
-    positionKeypair: Keypair;
-  }> {
+  async checkBinArrayCreationCost(
+    poolAddress: string,
+    minBinId: number,
+    maxBinId: number
+  ): Promise<CostEstimation> {
     try {
+      const pool = await this.initializePool(poolAddress);
+      const typedPool = pool as any;
+      
+      // Calculate which binArrays would be needed
+      const binArraysNeeded = new Set<number>();
+      
+      // Each binArray typically covers ~70 bins, but this can vary
+      // We'll check by trying to get bin data for key positions
+      for (let binId = minBinId; binId <= maxBinId; binId += 35) {
+        const binArrayIndex = Math.floor(binId / 35); // Approximate binArray indexing
+        binArraysNeeded.add(binArrayIndex);
+      }
+      
+      let newBinArraysCount = 0;
+      let existingBinArraysCount = 0;
+      
+      // Check which binArrays already exist
+      for (const binArrayIndex of binArraysNeeded) {
+        try {
+          // Try to get a bin in this array to see if it exists
+          const testBinId = binArrayIndex * 35;
+          await typedPool.getBin(testBinId);
+          existingBinArraysCount++;
+          console.log(`BinArray ${binArrayIndex} exists (test bin ${testBinId})`);
+        } catch (error) {
+          // BinArray doesn't exist, will need creation
+          newBinArraysCount++;
+          console.log(`BinArray ${binArrayIndex} needs creation (test bin failed)`);
+        }
+      }
+      
+      // Calculate costs
+      const positionRent = 0.057; // Standard position rent (refundable)
+      const binArrayCost = newBinArraysCount * 0.075; // 0.075 SOL per new binArray (non-refundable)
+      const transactionFees = 0.01; // Estimated transaction fees
+      const total = positionRent + binArrayCost + transactionFees;
+      
+      const costEstimation: CostEstimation = {
+        positionRent,
+        binArrayCost,
+        transactionFees,
+        total,
+        breakdown: {
+          newBinArraysNeeded: newBinArraysCount,
+          existingBinArrays: existingBinArraysCount,
+          estimatedComputeUnits: newBinArraysCount * 20000 + 50000 // Rough estimate
+        }
+      };
+      
+      console.log('Cost estimation for range', minBinId, 'to', maxBinId, ':', costEstimation);
+      
+      return costEstimation;
+      
+    } catch (error) {
+      console.error('Error checking binArray creation cost:', error);
+      
+      // Conservative fallback estimate
+      const binRangeWidth = maxBinId - minBinId;
+      const estimatedBinArrays = Math.ceil(binRangeWidth / 35); // Conservative estimate
+      
+      return {
+        positionRent: 0.057,
+        binArrayCost: estimatedBinArrays * 0.075,
+        transactionFees: 0.01,
+        total: 0.057 + (estimatedBinArrays * 0.075) + 0.01,
+        breakdown: {
+          newBinArraysNeeded: estimatedBinArrays,
+          existingBinArrays: 0,
+          estimatedComputeUnits: estimatedBinArrays * 20000 + 50000
+        }
+      };
+    }
+  }
+
+  /**
+   * Validate user balance before creating position
+   */
+  async validateUserBalance(
+    userPublicKey: PublicKey,
+    requiredSolAmount: number,
+    estimatedCost: CostEstimation
+  ): Promise<{ isValid: boolean; currentBalance: number; shortfall?: number; error?: string }> {
+    try {
+      const solBalanceLamports = await this.connection.getBalance(userPublicKey);
+      const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
+      
+      const totalRequired = requiredSolAmount + estimatedCost.total;
+      
+      if (solBalance < totalRequired) {
+        return {
+          isValid: false,
+          currentBalance: solBalance,
+          shortfall: totalRequired - solBalance,
+          error: `Insufficient SOL balance. Required: ${totalRequired.toFixed(4)} SOL, Available: ${solBalance.toFixed(4)} SOL`
+        };
+      }
+      
+      return {
+        isValid: true,
+        currentBalance: solBalance
+      };
+      
+    } catch (error) {
+      return {
+        isValid: false,
+        currentBalance: 0,
+        error: 'Failed to check balance: ' + (error instanceof Error ? error.message : String(error))
+      };
+    }
+  }
+
+  /**
+   * Create a new position with enhanced cost estimation and validation
+   */
+  async createBalancedPosition(params: CreatePositionParams): Promise<CreatePositionResult> {
+    try {
+      console.log('Creating balanced position with params:', {
+        poolAddress: params.poolAddress,
+        minBinId: params.minBinId,
+        maxBinId: params.maxBinId,
+        strategyType: params.strategyType,
+        useAutoFill: params.useAutoFill
+      });
+
+      // Step 1: Estimate costs before doing anything
+      const estimatedCost = await this.checkBinArrayCreationCost(
+        params.poolAddress,
+        params.minBinId,
+        params.maxBinId
+      );
+
+      console.log('Estimated cost for position:', estimatedCost);
+
+      // Step 2: Validate user balance
+      const estimatedSolForLiquidity = params.totalXAmount.toNumber() / Math.pow(10, 9); // Assuming 9 decimals
+      const balanceValidation = await this.validateUserBalance(
+        params.userPublicKey,
+        estimatedSolForLiquidity,
+        estimatedCost
+      );
+
+      if (!balanceValidation.isValid) {
+        throw new Error(balanceValidation.error || 'Insufficient balance');
+      }
+
+      console.log('Balance validation passed:', balanceValidation);
+
+      // Step 3: Initialize pool and create position
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
       const typedPool = pool as any;
@@ -83,6 +252,13 @@ export class MeteoraPositionService {
         try {
           // Get active bin information
           const activeBin = await typedPool.getActiveBin();
+          
+          console.log('Active bin info:', {
+            binId: activeBin.binId,
+            price: activeBin.price,
+            xAmount: activeBin.xAmount.toString(),
+            yAmount: activeBin.yAmount.toString()
+          });
           
           // Calculate balanced Y amount using SDK helper
           totalYAmount = autoFillYByStrategy(
@@ -104,6 +280,19 @@ export class MeteoraPositionService {
         }
       }
 
+      // Step 4: Create the position transaction
+      console.log('Creating position transaction with:', {
+        positionPubKey: newPosition.publicKey.toString(),
+        user: params.userPublicKey.toString(),
+        totalXAmount: params.totalXAmount.toString(),
+        totalYAmount: totalYAmount.toString(),
+        strategy: {
+          maxBinId: params.maxBinId,
+          minBinId: params.minBinId,
+          strategyType: params.strategyType,
+        }
+      });
+
       const createPositionTx = await typedPool.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: newPosition.publicKey,
         user: params.userPublicKey,
@@ -116,27 +305,50 @@ export class MeteoraPositionService {
         },
       });
 
+      console.log('Position transaction created successfully');
+
       return {
         transaction: createPositionTx,
         positionKeypair: newPosition,
+        estimatedCost
       };
     } catch (error) {
       console.error('Error creating balanced position:', error);
+      
+      // Enhanced error handling with specific error types
+      if (error instanceof Error) {
+        if (error.message.includes('insufficient lamports')) {
+          throw new Error('Insufficient SOL balance for position creation. Please add more SOL to your wallet.');
+        }
+        
+        if (error.message.includes('Transaction simulation failed')) {
+          throw new Error('Position creation failed during simulation. This usually indicates insufficient funds or invalid parameters.');
+        }
+        
+        if (error.message.includes('binArray')) {
+          throw new Error('Error with price bin creation. The selected range may require expensive bin creation. Try a different range.');
+        }
+      }
+      
       throw error;
     }
   }
 
   /**
-   * Create a one-sided position (single token) - IMPROVED
+   * Create a one-sided position (single token) with cost estimation
    */
   async createOneSidedPosition(
     params: CreatePositionParams,
     useTokenX: boolean
-  ): Promise<{
-    transaction: Transaction | Transaction[];
-    positionKeypair: Keypair;
-  }> {
+  ): Promise<CreatePositionResult> {
     try {
+      // First get cost estimation
+      const estimatedCost = await this.checkBinArrayCreationCost(
+        params.poolAddress,
+        params.minBinId,
+        params.maxBinId
+      );
+
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
       const typedPool = pool as any;
@@ -171,6 +383,7 @@ export class MeteoraPositionService {
       return {
         transaction: createPositionTx,
         positionKeypair: newPosition,
+        estimatedCost
       };
     } catch (error) {
       console.error('Error creating one-sided position:', error);
@@ -179,7 +392,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Add liquidity to an existing position - IMPROVED
+   * Add liquidity to an existing position with cost validation
    */
   async addLiquidity(
     params: PositionManagementParams,
@@ -238,7 +451,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Remove liquidity from a position - FIXED
+   * Remove liquidity from a position
    */
   async removeLiquidity(
     params: RemoveLiquidityParams
@@ -248,7 +461,6 @@ export class MeteoraPositionService {
       const positionPubKey = new PublicKey(params.positionPubkey);
       const typedPool = pool as any;
       
-      // Use the correct SDK parameters
       const removeLiquidityTx = await typedPool.removeLiquidity({
         position: positionPubKey,
         user: params.userPublicKey,
@@ -266,7 +478,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Remove liquidity with automatic bin detection - NEW
+   * Remove liquidity with automatic bin detection and percentage-based removal
    */
   async removeLiquidityFromPosition(
     params: PositionManagementParams,
@@ -300,7 +512,7 @@ export class MeteoraPositionService {
       const toBinId = Math.max(...binIdsToRemove);
       
       // Calculate percentage in basis points (10000 = 100%)
-      const bpsToRemove = new BN(percentageToRemove * 100); // Convert to basis points
+      const bpsToRemove = new BN(percentageToRemove * 100);
       const liquiditiesBpsToRemove = new Array(binIdsToRemove.length).fill(bpsToRemove);
 
       const removeLiquidityTx = await typedPool.removeLiquidity({
@@ -320,7 +532,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Claim fees from a position - UPDATED
+   * Claim fees from a position
    */
   async claimFees(params: PositionManagementParams): Promise<Transaction> {
     try {
@@ -341,7 +553,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Claim all fees from multiple positions - NEW
+   * Claim all fees from multiple positions
    */
   async claimAllFees(
     poolAddress: string,
@@ -388,7 +600,7 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Get position information - NEW
+   * Get position information
    */
   async getPositionInfo(
     poolAddress: string,
@@ -406,9 +618,70 @@ export class MeteoraPositionService {
       throw error;
     }
   }
+
+  /**
+   * Get range recommendations based on existing positions
+   */
+  async getRangeRecommendations(poolAddress: string): Promise<{
+    popular: { minBinId: number; maxBinId: number; cost: CostEstimation };
+    cheap: { minBinId: number; maxBinId: number; cost: CostEstimation };
+    balanced: { minBinId: number; maxBinId: number; cost: CostEstimation };
+  }> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      const typedPool = pool as any;
+      const activeBin = await typedPool.getActiveBin();
+      
+      // Define some common ranges to check
+      const ranges = [
+        { width: 5, minBinId: activeBin.binId - 5, maxBinId: activeBin.binId + 5 },
+        { width: 10, minBinId: activeBin.binId - 10, maxBinId: activeBin.binId + 10 },
+        { width: 15, minBinId: activeBin.binId - 15, maxBinId: activeBin.binId + 15 },
+        { width: 20, minBinId: activeBin.binId - 20, maxBinId: activeBin.binId + 20 },
+      ];
+      
+      // Get cost estimates for each range
+      const rangeWithCosts = await Promise.all(
+        ranges.map(async (range) => ({
+          ...range,
+          cost: await this.checkBinArrayCreationCost(poolAddress, range.minBinId, range.maxBinId)
+        }))
+      );
+      
+      // Find the cheapest option
+      const cheap = rangeWithCosts.reduce((prev, curr) => 
+        prev.cost.total < curr.cost.total ? prev : curr
+      );
+      
+      // Find popular (assume medium width is popular)
+      const popular = rangeWithCosts.find(r => r.width === 10) || rangeWithCosts[1];
+      
+      // Find balanced (good cost vs range width ratio)
+      const balanced = rangeWithCosts.find(r => r.width === 15) || rangeWithCosts[2];
+      
+      return { popular, cheap, balanced };
+    } catch (error) {
+      console.error('Error getting range recommendations:', error);
+      
+      // Fallback recommendations
+      const fallbackCost: CostEstimation = {
+        positionRent: 0.057,
+        binArrayCost: 0.075,
+        transactionFees: 0.01,
+        total: 0.137,
+        breakdown: { newBinArraysNeeded: 1, existingBinArrays: 0, estimatedComputeUnits: 50000 }
+      };
+      
+      return {
+        popular: { minBinId: 0, maxBinId: 20, cost: fallbackCost },
+        cheap: { minBinId: 0, maxBinId: 10, cost: { ...fallbackCost, total: 0.067 } },
+        balanced: { minBinId: 0, maxBinId: 15, cost: fallbackCost }
+      };
+    }
+  }
 }
 
-// Hook to use the position service
+// Enhanced hook to use the position service
 export function useMeteoraPositionService() {
   const { publicKey, sendTransaction } = useWallet();
   
@@ -421,5 +694,21 @@ export function useMeteoraPositionService() {
     service,
     publicKey,
     sendTransaction,
+    // Helper function to handle errors gracefully
+    handlePositionError: (error: unknown): string => {
+      if (error instanceof Error) {
+        if (error.message.includes('insufficient lamports')) {
+          return 'Insufficient SOL balance for this transaction.';
+        }
+        if (error.message.includes('Transaction simulation failed')) {
+          return 'Transaction simulation failed. Please check your balance and parameters.';
+        }
+        if (error.message.includes('binArray')) {
+          return 'Error with price bin creation. Try selecting a different price range.';
+        }
+        return error.message;
+      }
+      return 'An unexpected error occurred. Please try again.';
+    }
   };
 }
