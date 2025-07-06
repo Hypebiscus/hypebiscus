@@ -1,9 +1,9 @@
-// Enhanced AddLiquidityModal.tsx with proper balance validation and existing range support
+// Enhanced AddLiquidityModal.tsx with improved mobile/desktop views and in-range bins as default
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Info, AlertTriangle, CheckCircle } from "lucide-react";
+import { Loader2, Info, AlertTriangle, CheckCircle, TrendingUp, Shield, BarChart3 } from "lucide-react";
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
@@ -28,7 +28,7 @@ interface BalanceInfo {
   estimatedTokenNeeded: number;
 }
 
-// Use the ExistingRange interface from the service, with additional UI properties
+// Enhanced range recommendation interface with better UI properties
 interface RangeRecommendation {
   minBinId: number;
   maxBinId: number;
@@ -38,9 +38,11 @@ interface RangeRecommendation {
   totalLiquidity: number;
   estimatedCost: number;
   isPopular: boolean;
-  label?: string;
-  description?: string;
-  icon?: string;
+  label: string;
+  description: string;
+  icon: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  isInRange: boolean; // New property to indicate if range includes current price
 }
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
@@ -65,9 +67,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
 
-  // Range recommendation state - use the correct type from ExistingRangeService
-  const [rangeRecommendations, setRangeRecommendations] = useState<any>(null);
-  const [selectedRangeType, setSelectedRangeType] = useState<'cheapest' | 'mostPopular' | 'balanced' | 'custom'>('cheapest');
+  // Enhanced range recommendation state with better default selection
+  const [rangeRecommendations, setRangeRecommendations] = useState<{
+    inRange: RangeRecommendation;
+    conservative: RangeRecommendation;
+    balanced: RangeRecommendation;
+    aggressive: RangeRecommendation;
+    all: RangeRecommendation[];
+  } | null>(null);
+  const [selectedRangeType, setSelectedRangeType] = useState<'inRange' | 'conservative' | 'balanced' | 'aggressive' | 'custom'>('inRange');
   const [isLoadingRanges, setIsLoadingRanges] = useState(false);
 
   // Services
@@ -75,6 +83,193 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     new ExistingRangeService(new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com')), 
     []
   );
+
+  // Enhanced load existing ranges with in-range focus
+  const loadExistingRanges = async () => {
+    if (!pool) return;
+    
+    setIsLoadingRanges(true);
+    try {
+      // Get current price information first
+      const dlmmPool = await dlmmService.initializePool(pool.address);
+      const activeBin = await dlmmPool.getActiveBin();
+      const currentBinId = activeBin.binId;
+      
+      console.log('Current active bin ID:', currentBinId);
+      
+      // Create enhanced recommendations with current price focus
+      const enhancedRecommendations = {
+        // IN-RANGE: Tight range around current price (DEFAULT)
+        inRange: {
+          minBinId: currentBinId - 5,
+          maxBinId: currentBinId + 5,
+          centerBinId: currentBinId,
+          width: 10,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.057,
+          isPopular: true,
+          isInRange: true,
+          label: '🎯 In-Range (Recommended)',
+          description: 'Tight range around current price • Active earning • Lower cost',
+          icon: '🎯',
+          riskLevel: 'medium' as const
+        },
+        
+        // CONSERVATIVE: Wider range for stability
+        conservative: {
+          minBinId: currentBinId - 15,
+          maxBinId: currentBinId + 15,
+          centerBinId: currentBinId,
+          width: 30,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.082,
+          isPopular: false,
+          isInRange: true,
+          label: '🛡️ Conservative',
+          description: 'Wide range • Lower risk • Stable returns • May cost more',
+          icon: '🛡️',
+          riskLevel: 'low' as const
+        },
+        
+        // BALANCED: Medium range for balanced approach
+        balanced: {
+          minBinId: currentBinId - 10,
+          maxBinId: currentBinId + 10,
+          centerBinId: currentBinId,
+          width: 20,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.070,
+          isPopular: true,
+          isInRange: true,
+          label: '⚖️ Balanced',
+          description: 'Medium range • Good liquidity coverage • Moderate cost',
+          icon: '⚖️',
+          riskLevel: 'medium' as const
+        },
+        
+        // AGGRESSIVE: Very tight range for maximum fees
+        aggressive: {
+          minBinId: currentBinId - 3,
+          maxBinId: currentBinId + 3,
+          centerBinId: currentBinId,
+          width: 6,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.057,
+          isPopular: false,
+          isInRange: true,
+          label: '🚀 Aggressive',
+          description: 'Very tight range • Maximum fees • Higher risk • Lowest cost',
+          icon: '🚀',
+          riskLevel: 'high' as const
+        },
+        
+        all: []
+      };
+      
+      // Try to get actual existing ranges for cost optimization
+      try {
+        const existingRanges = await existingRangeService.findExistingRanges(pool.address);
+        
+        // Update costs based on existing ranges if available
+        if (existingRanges.cheapest) {
+          // Find the closest existing range to our in-range recommendation
+          const inRangeOverlap = Math.max(0, 
+            Math.min(enhancedRecommendations.inRange.maxBinId, existingRanges.cheapest.maxBinId) -
+            Math.max(enhancedRecommendations.inRange.minBinId, existingRanges.cheapest.minBinId)
+          );
+          
+          if (inRangeOverlap > 0) {
+            enhancedRecommendations.inRange.estimatedCost = existingRanges.cheapest.estimatedCost;
+            enhancedRecommendations.inRange.description = 'Tight range around current price • Uses existing bins • Very low cost';
+          }
+        }
+      } catch (error) {
+        console.warn('Could not load existing ranges, using estimates:', error);
+      }
+      
+      setRangeRecommendations(enhancedRecommendations);
+      
+      // Default to in-range selection
+      setSelectedRangeType('inRange');
+      setRangeWidth(enhancedRecommendations.inRange.width.toString());
+      
+    } catch (error) {
+      console.error('Error loading ranges:', error);
+      
+      // Fallback recommendations
+      const fallbackRecommendations = {
+        inRange: {
+          minBinId: 0,
+          maxBinId: 10,
+          centerBinId: 5,
+          width: 10,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.057,
+          isPopular: true,
+          isInRange: true,
+          label: '🎯 In-Range (Recommended)',
+          description: 'Default tight range around current price',
+          icon: '🎯',
+          riskLevel: 'medium' as const
+        },
+        conservative: {
+          minBinId: -15,
+          maxBinId: 25,
+          centerBinId: 5,
+          width: 40,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.150,
+          isPopular: false,
+          isInRange: true,
+          label: '🛡️ Conservative',
+          description: 'Wide range for stability',
+          icon: '🛡️',
+          riskLevel: 'low' as const
+        },
+        balanced: {
+          minBinId: -5,
+          maxBinId: 15,
+          centerBinId: 5,
+          width: 20,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.090,
+          isPopular: true,
+          isInRange: true,
+          label: '⚖️ Balanced',
+          description: 'Medium range for balanced approach',
+          icon: '⚖️',
+          riskLevel: 'medium' as const
+        },
+        aggressive: {
+          minBinId: 2,
+          maxBinId: 8,
+          centerBinId: 5,
+          width: 6,
+          positionCount: 0,
+          totalLiquidity: 0,
+          estimatedCost: 0.057,
+          isPopular: false,
+          isInRange: true,
+          label: '🚀 Aggressive',
+          description: 'Very tight range for maximum fees',
+          icon: '🚀',
+          riskLevel: 'high' as const
+        },
+        all: []
+      };
+      
+      setRangeRecommendations(fallbackRecommendations);
+    } finally {
+      setIsLoadingRanges(false);
+    }
+  };
 
   // Load existing ranges when modal opens
   useEffect(() => {
@@ -92,92 +287,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setValidationError('');
     }
   }, [amount, publicKey, pool]);
-
-  const loadExistingRanges = async () => {
-    if (!pool) return;
-    
-    setIsLoadingRanges(true);
-    try {
-      const recommendations = await existingRangeService.findExistingRanges(pool.address);
-      
-      // Add UI properties to the recommendations
-      const enhancedRecommendations = {
-        cheapest: {
-          ...recommendations.cheapest,
-          label: '💰 Cheapest Option',
-          description: `Width: ${recommendations.cheapest.width} bins • Cost: ${recommendations.cheapest.estimatedCost.toFixed(3)} SOL`,
-          icon: '💰'
-        },
-        mostPopular: {
-          ...recommendations.mostPopular,
-          label: '🔥 Most Popular',
-          description: `Width: ${recommendations.mostPopular.width} bins • ${recommendations.mostPopular.positionCount} positions • Cost: ${recommendations.mostPopular.estimatedCost.toFixed(3)} SOL`,
-          icon: '🔥'
-        },
-        balanced: {
-          ...recommendations.balanced,
-          label: '⚖️ Balanced',
-          description: `Width: ${recommendations.balanced.width} bins • Good liquidity • Cost: ${recommendations.balanced.estimatedCost.toFixed(3)} SOL`,
-          icon: '⚖️'
-        },
-        all: recommendations.all
-      };
-      
-      setRangeRecommendations(enhancedRecommendations);
-      
-      // Auto-select the cheapest option
-      setSelectedRangeType('cheapest');
-      
-      // Update range width based on selection
-      if (enhancedRecommendations.cheapest) {
-        setRangeWidth(enhancedRecommendations.cheapest.width.toString());
-      }
-      
-    } catch (error) {
-      console.error('Error loading existing ranges:', error);
-      // Set fallback recommendations with proper structure
-      const fallbackRange = {
-        minBinId: 0,
-        maxBinId: 20,
-        centerBinId: 10,
-        width: 10,
-        positionCount: 0,
-        totalLiquidity: 0,
-        estimatedCost: 0.057,
-        isPopular: false
-      };
-      
-      setRangeRecommendations({
-        cheapest: {
-          ...fallbackRange,
-          label: '💰 Cheapest Option',
-          description: '10 bins width - estimated cost',
-          icon: '💰'
-        },
-        mostPopular: {
-          ...fallbackRange,
-          width: 15,
-          maxBinId: 30,
-          label: '🔥 Most Popular',
-          description: '15 bins width - estimated cost',
-          icon: '🔥'
-        },
-        balanced: {
-          ...fallbackRange,
-          width: 12,
-          maxBinId: 24,
-          label: '⚖️ Balanced',
-          description: '12 bins width - estimated cost',
-          icon: '⚖️'
-        },
-        all: []
-      });
-    } finally {
-      setIsLoadingRanges(false);
-    }
-  };
-
-  // Remove this function since we're handling fallbacks in loadExistingRanges
 
   const checkUserBalances = async () => {
     if (!publicKey || !pool || !amount || parseFloat(amount) <= 0) return;
@@ -295,7 +404,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   };
 
-  const handleRangeTypeChange = (type: 'cheapest' | 'mostPopular' | 'balanced' | 'custom') => {
+  // Enhanced range type change handler
+  const handleRangeTypeChange = (type: 'inRange' | 'conservative' | 'balanced' | 'aggressive' | 'custom') => {
     setSelectedRangeType(type);
     
     if (type !== 'custom' && rangeRecommendations) {
@@ -353,7 +463,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         minBinId = selectedRange.minBinId;
         maxBinId = selectedRange.maxBinId;
         
-        console.log(`Using existing range: ${selectedRangeType}, bins ${minBinId} to ${maxBinId}, estimated cost: ${selectedRange.estimatedCost} SOL`);
+        console.log(`Using ${selectedRangeType} range: bins ${minBinId} to ${maxBinId}, estimated cost: ${selectedRange.estimatedCost} SOL`);
       } else {
         // Custom range (may cost more)
         const rangeWidthNum = parseInt(rangeWidth);
@@ -416,48 +526,60 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setIsLoading(false);
     }
   };
+
+  // Get risk level color
+  const getRiskLevelColor = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'low': return 'text-green-400 bg-green-500/10 border-green-500/20';
+      case 'medium': return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
+      case 'high': return 'text-red-400 bg-red-500/10 border-red-500/20';
+      default: return 'text-gray-400 bg-gray-500/10 border-gray-500/20';
+    }
+  };
   
   return (
     <Dialog open={isOpen && !!pool} onOpenChange={onClose}>
-      <DialogContent className="bg-[#161616] border-border text-white max-w-md" aria-describedby="add-liquidity-description">
-        <DialogHeader>
-          <DialogTitle className="text-white">Add Liquidity to {pool?.name}</DialogTitle>
-          <DialogDescription id="add-liquidity-description">
+      <DialogContent className="bg-[#161616] border-border text-white max-w-lg mx-auto max-h-[90vh] overflow-y-auto" aria-describedby="add-liquidity-description">
+        <DialogHeader className="space-y-3">
+          <DialogTitle className="text-white text-xl">Add Liquidity to {pool?.name}</DialogTitle>
+          <DialogDescription id="add-liquidity-description" className="text-sm text-sub-text">
             Add liquidity to this pool to earn fees from trading activity
           </DialogDescription>
         </DialogHeader>
         
-        <div className="space-y-4 mt-4">
+        <div className="space-y-6 mt-6">
           {/* Balance Display */}
           {balanceInfo && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg p-3">
-              <div className="text-sm text-sub-text mb-2">Account Balance:</div>
-              <div className="flex justify-between text-xs">
-                <span>SOL Balance:</span>
-                <span className={balanceInfo.hasEnoughSol ? 'text-green-400' : 'text-red-400'}>
-                  {balanceInfo.solBalance.toFixed(4)} SOL
-                </span>
-              </div>
-              {balanceInfo.estimatedSolNeeded > 0 && (
-                <div className="flex justify-between text-xs">
-                  <span>SOL Needed:</span>
-                  <span>{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+              <div className="text-sm text-sub-text mb-3 font-medium">Account Balance</div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span>SOL Balance:</span>
+                  <span className={balanceInfo.hasEnoughSol ? 'text-green-400 font-medium' : 'text-red-400 font-medium'}>
+                    {balanceInfo.solBalance.toFixed(4)} SOL
+                  </span>
                 </div>
-              )}
+                {balanceInfo.estimatedSolNeeded > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span>SOL Needed:</span>
+                    <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
           {/* Validation Error Display */}
           {validationError && (
-            <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-3 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-red-200">{validationError}</div>
             </div>
           )}
 
           {/* Amount Input */}
-          <div>
-            <label className="text-sm text-sub-text block mb-1">
+          <div className="space-y-3">
+            <label className="text-sm text-sub-text block font-medium">
               Amount ({pool?.name.split('-')[0].replace('WBTC', 'BTC')})
             </label>
             <div className="relative">
@@ -466,13 +588,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                 value={amount}
                 onChange={handleAmountChange}
                 placeholder="0.0"
-                className="w-full bg-[#0f0f0f] border border-border rounded-lg p-3 text-white pr-16"
+                className="w-full bg-[#0f0f0f] border border-border rounded-lg p-4 text-white pr-20 text-lg font-medium"
               />
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 bg-secondary/30 px-2 py-1 rounded text-xs">
+              <div className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-secondary/30 px-3 py-1.5 rounded text-sm font-medium">
                 {pool?.name.split('-')[0].replace('WBTC', 'BTC')}
               </div>
               {isCheckingBalance && (
-                <div className="absolute right-16 top-1/2 transform -translate-y-1/2">
+                <div className="absolute right-24 top-1/2 transform -translate-y-1/2">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 </div>
               )}
@@ -480,7 +602,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           </div>
 
           {/* Auto-Fill Toggle */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg border border-border">
             <input
               type="checkbox"
               id="autoFill"
@@ -488,132 +610,158 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               onChange={(e) => setUseAutoFill(e.target.checked)}
               className="rounded"
             />
-            <label htmlFor="autoFill" className="text-sm text-sub-text">
+            <label htmlFor="autoFill" className="text-sm text-white font-medium">
               Auto-calculate balanced amount
             </label>
           </div>
 
           {/* Estimated Y Amount Display */}
           {useAutoFill && estimatedYAmount && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg p-3">
-              <div className="text-sm text-sub-text mb-1">
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+              <div className="text-sm text-sub-text mb-2 font-medium">
                 Estimated {pool?.name.split('-')[1]} Amount:
               </div>
-              <div className="text-white font-medium">
+              <div className="text-white font-bold text-lg">
                 {estimatedYAmount}
               </div>
             </div>
           )}
 
-          {/* Existing Range Recommendations */}
+          {/* Enhanced Range Recommendations */}
           {rangeRecommendations && (
             <div className="space-y-4">
               <div>
-                <label className="text-sm text-sub-text block mb-2">
-                  💡 Recommended Ranges (Using Existing Bins - Lower Cost)
+                <label className="text-sm text-sub-text block mb-3 font-medium">
+                  💡 Position Range Strategy
                 </label>
                 
                 {isLoadingRanges ? (
-                  <div className="flex items-center justify-center p-4">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary mr-2" />
-                    <span className="text-sm">Finding existing ranges...</span>
+                  <div className="flex items-center justify-center p-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary mr-3" />
+                    <span className="text-sm">Loading optimal ranges...</span>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {/* Cheapest Option */}
+                  <div className="grid gap-3">
+                    {/* In-Range Option (Default & Recommended) */}
                     <div 
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                        selectedRangeType === 'cheapest' 
+                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                        selectedRangeType === 'inRange' 
                           ? 'border-green-500 bg-green-500/10' 
-                          : 'border-border bg-[#0f0f0f]'
+                          : 'border-border bg-[#0f0f0f] hover:border-green-500/50'
                       }`}
-                      onClick={() => handleRangeTypeChange('cheapest')}
+                      onClick={() => handleRangeTypeChange('inRange')}
                     >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-green-400 text-sm flex items-center gap-1">
-                            {rangeRecommendations.cheapest.label || '💰 Cheapest Option'}
-                            {rangeRecommendations.cheapest.isPopular && <span className="text-xs">🔥</span>}
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="text-xs text-sub-text mb-2">
+                            {rangeRecommendations.conservative.description}
                           </div>
-                          <div className="text-xs text-sub-text">
-                            {rangeRecommendations.cheapest.description || 
-                             `Width: ${rangeRecommendations.cheapest.width} bins • Cost: ${rangeRecommendations.cheapest.estimatedCost.toFixed(3)} SOL`}
+                          <div className="flex items-center gap-4 text-xs">
+                            <span>Width: {rangeRecommendations.conservative.width} bins</span>
+                            <span>Cost: {rangeRecommendations.conservative.estimatedCost.toFixed(3)} SOL</span>
                           </div>
                         </div>
-                        {selectedRangeType === 'cheapest' && (
-                          <CheckCircle className="h-4 w-4 text-green-400" />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Most Popular Option */}
-                    <div 
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                        selectedRangeType === 'mostPopular' 
-                          ? 'border-blue-500 bg-blue-500/10' 
-                          : 'border-border bg-[#0f0f0f]'
-                      }`}
-                      onClick={() => handleRangeTypeChange('mostPopular')}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-blue-400 text-sm">
-                            {rangeRecommendations.mostPopular.label || '🔥 Most Popular'}
-                          </div>
-                          <div className="text-xs text-sub-text">
-                            {rangeRecommendations.mostPopular.description || 
-                             `Width: ${rangeRecommendations.mostPopular.width} bins • ${rangeRecommendations.mostPopular.positionCount} positions • Cost: ${rangeRecommendations.mostPopular.estimatedCost.toFixed(3)} SOL`}
-                          </div>
-                        </div>
-                        {selectedRangeType === 'mostPopular' && (
-                          <CheckCircle className="h-4 w-4 text-blue-400" />
+                        {selectedRangeType === 'conservative' && (
+                          <CheckCircle className="h-5 w-5 text-blue-400 flex-shrink-0" />
                         )}
                       </div>
                     </div>
 
                     {/* Balanced Option */}
                     <div 
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
                         selectedRangeType === 'balanced' 
                           ? 'border-primary bg-primary/10' 
-                          : 'border-border bg-[#0f0f0f]'
+                          : 'border-border bg-[#0f0f0f] hover:border-primary/50'
                       }`}
                       onClick={() => handleRangeTypeChange('balanced')}
                     >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-primary text-sm">
-                            {rangeRecommendations.balanced.label || '⚖️ Balanced'}
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">{rangeRecommendations.balanced.icon}</span>
+                            <div className="font-medium text-primary text-sm">
+                              {rangeRecommendations.balanced.label}
+                            </div>
+                            <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.balanced.riskLevel)}`}>
+                              {rangeRecommendations.balanced.riskLevel.toUpperCase()}
+                            </div>
                           </div>
-                          <div className="text-xs text-sub-text">
-                            {rangeRecommendations.balanced.description || 
-                             `Width: ${rangeRecommendations.balanced.width} bins • Good liquidity • Cost: ${rangeRecommendations.balanced.estimatedCost.toFixed(3)} SOL`}
+                          <div className="text-xs text-sub-text mb-2">
+                            {rangeRecommendations.balanced.description}
+                          </div>
+                          <div className="flex items-center gap-4 text-xs">
+                            <span>Width: {rangeRecommendations.balanced.width} bins</span>
+                            <span>Cost: {rangeRecommendations.balanced.estimatedCost.toFixed(3)} SOL</span>
                           </div>
                         </div>
                         {selectedRangeType === 'balanced' && (
-                          <CheckCircle className="h-4 w-4 text-primary" />
+                          <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Aggressive Option */}
+                    <div 
+                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                        selectedRangeType === 'aggressive' 
+                          ? 'border-red-500 bg-red-500/10' 
+                          : 'border-border bg-[#0f0f0f] hover:border-red-500/50'
+                      }`}
+                      onClick={() => handleRangeTypeChange('aggressive')}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">{rangeRecommendations.aggressive.icon}</span>
+                            <div className="font-medium text-red-400 text-sm">
+                              {rangeRecommendations.aggressive.label}
+                            </div>
+                            <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.aggressive.riskLevel)}`}>
+                              {rangeRecommendations.aggressive.riskLevel.toUpperCase()}
+                            </div>
+                          </div>
+                          <div className="text-xs text-sub-text mb-2">
+                            {rangeRecommendations.aggressive.description}
+                          </div>
+                          <div className="flex items-center gap-4 text-xs">
+                            <span>Width: {rangeRecommendations.aggressive.width} bins</span>
+                            <span>Cost: {rangeRecommendations.aggressive.estimatedCost.toFixed(3)} SOL</span>
+                          </div>
+                        </div>
+                        {selectedRangeType === 'aggressive' && (
+                          <CheckCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
                         )}
                       </div>
                     </div>
 
                     {/* Custom Option */}
                     <div 
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
                         selectedRangeType === 'custom' 
                           ? 'border-yellow-500 bg-yellow-500/10' 
-                          : 'border-border bg-[#0f0f0f]'
+                          : 'border-border bg-[#0f0f0f] hover:border-yellow-500/50'
                       }`}
                       onClick={() => handleRangeTypeChange('custom')}
                     >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-yellow-400 text-sm">⚙️ Custom Range</div>
-                          <div className="text-xs text-sub-text">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">⚙️</span>
+                            <div className="font-medium text-yellow-400 text-sm">Custom Range</div>
+                            <div className="px-2 py-1 rounded-full text-xs border text-gray-400 bg-gray-500/10 border-gray-500/20">
+                              CUSTOM
+                            </div>
+                          </div>
+                          <div className="text-xs text-sub-text mb-2">
                             Set your own range (may cost more if bins don't exist)
+                          </div>
+                          <div className="flex items-center gap-4 text-xs">
+                            <span>Custom width • Variable cost</span>
                           </div>
                         </div>
                         {selectedRangeType === 'custom' && (
-                          <CheckCircle className="h-4 w-4 text-yellow-400" />
+                          <CheckCircle className="h-5 w-5 text-yellow-400 flex-shrink-0" />
                         )}
                       </div>
                     </div>
@@ -623,8 +771,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
               {/* Custom Range Input (only show when custom is selected) */}
               {selectedRangeType === 'custom' && (
-                <div>
-                  <label className="text-sm text-sub-text block mb-1">
+                <div className="bg-[#0f0f0f] border border-yellow-500/30 rounded-lg p-4">
+                  <label className="text-sm text-sub-text block mb-2 font-medium">
                     Custom Range Width (bins on each side)
                   </label>
                   <input
@@ -633,31 +781,38 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     onChange={(e) => setRangeWidth(e.target.value)}
                     min="1"
                     max="50"
-                    className="w-full bg-[#0f0f0f] border border-border rounded-lg p-3 text-white"
+                    className="w-full bg-[#161616] border border-border rounded-lg p-3 text-white"
+                    placeholder="Enter range width"
                   />
-                  <p className="text-xs text-yellow-400 mt-1">
-                    ⚠️ Custom ranges may require creating new bins (additional ~0.15 SOL cost)
-                  </p>
+                  <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                      <div className="text-xs text-yellow-200">
+                        <div className="font-medium mb-1">Custom Range Warning</div>
+                        <div>Custom ranges may require creating new price bins, which can cost an additional ~0.15 SOL. Consider using recommended ranges for lower costs.</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 
               {/* Cost Summary */}
-              <div className="bg-[#0f0f0f] border border-border rounded-lg p-3">
-                <div className="text-sm text-sub-text mb-2">Position Cost Breakdown:</div>
-                <div className="space-y-1 text-xs">
+              <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+                <div className="text-sm text-sub-text mb-3 font-medium">Position Cost Breakdown</div>
+                <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span>Position Rent (refundable):</span>
-                    <span className="text-green-400">0.057 SOL</span>
+                    <span className="text-green-400 font-medium">0.057 SOL</span>
                   </div>
                   {selectedRangeType !== 'custom' && rangeRecommendations && (
                     <div className="flex justify-between">
                       <span>BinArray Cost (using existing):</span>
-                      <span className="text-green-400">
+                      <span className="text-green-400 font-medium">
                         {(rangeRecommendations[selectedRangeType].estimatedCost - 0.057).toFixed(3)} SOL
                       </span>
                     </div>
                   )}
-                  <div className="flex justify-between font-medium border-t border-border pt-1 mt-1">
+                  <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
                     <span>Total Estimated Cost:</span>
                     <span className={
                       selectedRangeType !== 'custom' && rangeRecommendations 
@@ -676,12 +831,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           )}
           
           {/* Strategy Selection */}
-          <div>
-            <label className="text-sm text-sub-text block mb-1">Strategy</label>
+          <div className="space-y-3">
+            <label className="text-sm text-sub-text block font-medium">Strategy</label>
             <select
               value={strategy}
               onChange={(e) => setStrategy(e.target.value)}
-              className="w-full bg-[#0f0f0f] border border-border rounded-lg p-3 text-white"
+              className="w-full bg-[#0f0f0f] border border-border rounded-lg p-4 text-white"
             >
               <option value="Spot">Spot (Balanced Distribution)</option>
               <option value="BidAsk">BidAsk (Edge Concentration)</option>
@@ -690,22 +845,47 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           </div>
           
           {/* Pool Information */}
-          <div className="flex items-start gap-2 bg-[#0f0f0f] p-3 rounded-lg">
-            <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <div className="text-xs text-sub-text">
-              <p className="mb-1">Current price: ${pool?.currentPrice}</p>
-              <p className="mb-1">Expected APY: {pool?.apy}</p>
-              <p className="mb-1">Bin Step: {pool?.binStep}</p>
-              <p className="mb-1">Pool: {pool?.address.slice(0, 8)}...</p>
-              {selectedRangeType !== 'custom' && rangeRecommendations && (
-                <p className="text-green-400">💡 Using existing price bins - saves on creation costs!</p>
-              )}
+          <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <Info className="h-5 w-5 flex-shrink-0 mt-0.5 text-primary" />
+              <div className="text-sm text-sub-text space-y-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-xs text-sub-text">Current Price</div>
+                    <div className="text-white font-medium">${pool?.currentPrice}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-sub-text">Expected APY</div>
+                    <div className="text-white font-medium">{pool?.apy}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-sub-text">Bin Step</div>
+                    <div className="text-white font-medium">{pool?.binStep}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-sub-text">Pool Address</div>
+                    <div className="text-white font-medium font-mono">{pool?.address.slice(0, 8)}...</div>
+                  </div>
+                </div>
+                {selectedRangeType !== 'custom' && rangeRecommendations && (
+                  <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded">
+                    <div className="text-green-400 text-xs font-medium">
+                      💡 Using optimized range strategy - this saves on creation costs by utilizing existing price bins!
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
         
-        <DialogFooter className="mt-6">
-          <Button variant="outline" onClick={onClose} disabled={isLoading}>
+        <DialogFooter className="mt-8 flex flex-col sm:flex-row gap-3">
+          <Button 
+            variant="outline" 
+            onClick={onClose} 
+            disabled={isLoading}
+            className="w-full sm:w-auto"
+          >
             Cancel
           </Button>
           <Button 
@@ -717,7 +897,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               isCheckingBalance ||
               (balanceInfo ? (!balanceInfo.hasEnoughSol || !balanceInfo.hasEnoughToken) : false)
             }
-            className="bg-primary hover:bg-primary/80"
+            className="bg-primary hover:bg-primary/80 w-full sm:w-auto"
           >
             {isLoading ? (
               <>
