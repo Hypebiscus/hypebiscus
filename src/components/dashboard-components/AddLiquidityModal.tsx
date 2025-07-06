@@ -1,4 +1,4 @@
-// Enhanced AddLiquidityModal.tsx with improved mobile/desktop views and in-range bins as default
+// Enhanced AddLiquidityModal.tsx with one-sided liquidity provision support
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -61,6 +61,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [strategy, setStrategy] = useState<string>('Spot');
   const [useAutoFill, setUseAutoFill] = useState(true);
   const [estimatedYAmount, setEstimatedYAmount] = useState<string>('');
+  
+  // One-sided liquidity state
+  const [isOneSided, setIsOneSided] = useState(false);
+  const [selectedToken, setSelectedToken] = useState<'X' | 'Y'>('X');
   
   // Balance validation state
   const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
@@ -278,6 +282,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen, pool]);
 
+  // Reset one-sided settings when useAutoFill changes
+  useEffect(() => {
+    if (useAutoFill) {
+      setIsOneSided(false);
+    }
+  }, [useAutoFill]);
+
   // Check user balances when amount changes
   useEffect(() => {
     if (amount && parseFloat(amount) > 0 && publicKey && pool) {
@@ -286,7 +297,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setBalanceInfo(null);
       setValidationError('');
     }
-  }, [amount, publicKey, pool]);
+  }, [amount, publicKey, pool, isOneSided, selectedToken]);
 
   const checkUserBalances = async () => {
     if (!publicKey || !pool || !amount || parseFloat(amount) <= 0) return;
@@ -315,12 +326,25 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         estimatedCost = 0.207; // Conservative estimate for custom ranges
       }
       
-      const estimatedSolNeeded = amountValue + estimatedCost + 0.01; // Add buffer for fees
+      // Calculate estimated SOL needed based on whether it's one-sided or not
+      let estimatedSolNeeded = estimatedCost + 0.01; // Base cost + buffer for fees
       
-      // Get estimated Y amount for balanced position
-      let estimatedYValue = 0;
-      if (useAutoFill && estimatedYAmount) {
-        estimatedYValue = parseFloat(estimatedYAmount);
+      if (isOneSided) {
+        // For one-sided, we only need the token we're providing
+        if (selectedToken === 'Y') {
+          // Providing SOL
+          estimatedSolNeeded += amountValue;
+        }
+        // If providing token X (zBTC), we don't need additional SOL for liquidity
+      } else {
+        // For balanced positions, calculate based on auto-fill
+        estimatedSolNeeded += amountValue; // Assume we need SOL amount
+        
+        // Get estimated Y amount for balanced position
+        let estimatedYValue = 0;
+        if (useAutoFill && estimatedYAmount) {
+          estimatedYValue = parseFloat(estimatedYAmount);
+        }
       }
 
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
@@ -332,7 +356,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         hasEnoughSol,
         hasEnoughToken,
         estimatedSolNeeded,
-        estimatedTokenNeeded: estimatedYValue
+        estimatedTokenNeeded: isOneSided && selectedToken === 'X' ? amountValue : 0
       };
 
       setBalanceInfo(balanceInfo);
@@ -357,12 +381,14 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     const value = e.target.value;
     if (/^[0-9]*\.?[0-9]*$/.test(value) || value === '') {
       setAmount(value);
-      calculateEstimatedYAmount(value);
+      if (!isOneSided) {
+        calculateEstimatedYAmount(value);
+      }
     }
   };
   
   const calculateEstimatedYAmount = async (xAmount: string) => {
-    if (!pool || !xAmount || parseFloat(xAmount) <= 0 || !useAutoFill) {
+    if (!pool || !xAmount || parseFloat(xAmount) <= 0 || !useAutoFill || isOneSided) {
       setEstimatedYAmount('');
       return;
     }
@@ -439,7 +465,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       }
       
       const amountValue = parseFloat(amount);
-      const requiredSol = amountValue + estimatedCost + 0.01;
+      const requiredSol = isOneSided && selectedToken === 'X' 
+        ? estimatedCost + 0.01 // Only need cost for position + fees if providing zBTC
+        : amountValue + estimatedCost + 0.01; // Need amount + cost + fees if providing SOL
       
       if (currentSolBalance < requiredSol) {
         alert(`Real-time balance check failed. Current SOL balance: ${currentSolBalance.toFixed(4)}, Required: ${requiredSol.toFixed(4)}`);
@@ -455,60 +483,121 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     
     try {
       const activeBin = await dlmmService.getActiveBin(pool.address);
-      let minBinId, maxBinId;
-      
-      // Use selected range from recommendations or custom
-      if (selectedRangeType !== 'custom' && rangeRecommendations) {
-        const selectedRange = rangeRecommendations[selectedRangeType];
-        minBinId = selectedRange.minBinId;
-        maxBinId = selectedRange.maxBinId;
-        
-        console.log(`Using ${selectedRangeType} range: bins ${minBinId} to ${maxBinId}, estimated cost: ${selectedRange.estimatedCost} SOL`);
-      } else {
-        // Custom range (may cost more)
-        const rangeWidthNum = parseInt(rangeWidth);
-        minBinId = activeBin.binId - rangeWidthNum;
-        maxBinId = activeBin.binId + rangeWidthNum;
-        
-        console.log(`Using custom range: bins ${minBinId} to ${maxBinId} (may require new binArrays)`);
-      }
-      
       const decimals = 9;
       const bnAmount = new BN(parseFloat(amount) * Math.pow(10, decimals));
       
-      const result = await positionService.createBalancedPosition({
-        poolAddress: pool.address,
-        userPublicKey: publicKey,
-        totalXAmount: bnAmount,
-        minBinId,
-        maxBinId,
-        strategyType: getStrategyType(),
-        useAutoFill: useAutoFill
-      });
-      
-      if (Array.isArray(result.transaction)) {
-        for (const tx of result.transaction) {
-          const signature = await sendTransaction(tx, dlmmService.connection, {
+      if (isOneSided) {
+        // One-sided liquidity provision
+        let adjustedMinBinId: number;
+        let adjustedMaxBinId: number;
+        
+        // Parse token names from pool name
+        const [tokenXName, tokenYName] = pool.name.split('-');
+        const isProvidingTokenX = selectedToken === 'X';
+        
+        if (isProvidingTokenX) {
+          // Providing token X (e.g., zBTC) - position must be above current price
+          adjustedMinBinId = activeBin.binId + 1;
+          adjustedMaxBinId = activeBin.binId + parseInt(rangeWidth);
+          
+          console.log(`Creating one-sided position for ${tokenXName} above current price: bins ${adjustedMinBinId} to ${adjustedMaxBinId}`);
+        } else {
+          // Providing token Y (e.g., SOL) - position must be below current price
+          adjustedMinBinId = activeBin.binId - parseInt(rangeWidth);
+          adjustedMaxBinId = activeBin.binId - 1;
+          
+          console.log(`Creating one-sided position for ${tokenYName} below current price: bins ${adjustedMinBinId} to ${adjustedMaxBinId}`);
+        }
+        
+        const result = await positionService.createOneSidedPosition({
+          poolAddress: pool.address,
+          userPublicKey: publicKey,
+          totalXAmount: isProvidingTokenX ? bnAmount : new BN(0),
+          totalYAmount: isProvidingTokenX ? new BN(0) : bnAmount,
+          minBinId: adjustedMinBinId,
+          maxBinId: adjustedMaxBinId,
+          strategyType: getStrategyType(),
+          useAutoFill: false // Always false for one-sided
+        }, isProvidingTokenX);
+        
+        if (Array.isArray(result.transaction)) {
+          for (const tx of result.transaction) {
+            const signature = await sendTransaction(tx, dlmmService.connection, {
+              signers: [result.positionKeypair]
+            });
+            console.log('Transaction signature:', signature);
+          }
+        } else {
+          const signature = await sendTransaction(result.transaction, dlmmService.connection, {
             signers: [result.positionKeypair]
           });
           console.log('Transaction signature:', signature);
         }
+        
+        // Show success message with details
+        const actualCost = result.estimatedCost?.total || 0.057;
+        const tokenName = isProvidingTokenX ? tokenXName : tokenYName;
+        alert(`One-sided liquidity added successfully! 
+Token: ${tokenName}
+Position: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... 
+Cost: ${actualCost.toFixed(3)} SOL`);
+        
       } else {
-        const signature = await sendTransaction(result.transaction, dlmmService.connection, {
-          signers: [result.positionKeypair]
+        // Balanced position (existing logic)
+        let minBinId, maxBinId;
+        
+        // Use selected range from recommendations or custom
+        if (selectedRangeType !== 'custom' && rangeRecommendations) {
+          const selectedRange = rangeRecommendations[selectedRangeType];
+          minBinId = selectedRange.minBinId;
+          maxBinId = selectedRange.maxBinId;
+          
+          console.log(`Using ${selectedRangeType} range: bins ${minBinId} to ${maxBinId}, estimated cost: ${selectedRange.estimatedCost} SOL`);
+        } else {
+          // Custom range (may cost more)
+          const rangeWidthNum = parseInt(rangeWidth);
+          minBinId = activeBin.binId - rangeWidthNum;
+          maxBinId = activeBin.binId + rangeWidthNum;
+          
+          console.log(`Using custom range: bins ${minBinId} to ${maxBinId} (may require new binArrays)`);
+        }
+        
+        const result = await positionService.createBalancedPosition({
+          poolAddress: pool.address,
+          userPublicKey: publicKey,
+          totalXAmount: bnAmount,
+          minBinId,
+          maxBinId,
+          strategyType: getStrategyType(),
+          useAutoFill: useAutoFill
         });
-        console.log('Transaction signature:', signature);
+        
+        if (Array.isArray(result.transaction)) {
+          for (const tx of result.transaction) {
+            const signature = await sendTransaction(tx, dlmmService.connection, {
+              signers: [result.positionKeypair]
+            });
+            console.log('Transaction signature:', signature);
+          }
+        } else {
+          const signature = await sendTransaction(result.transaction, dlmmService.connection, {
+            signers: [result.positionKeypair]
+          });
+          console.log('Transaction signature:', signature);
+        }
+        
+        // Show success message with cost information
+        const actualCost = result.estimatedCost?.total || 0.057;
+        alert(`Balanced liquidity added successfully! Position: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... (Cost: ${actualCost.toFixed(3)} SOL)`);
       }
-      
-      // Show success message with cost information
-      const actualCost = result.estimatedCost?.total || 0.057;
-      alert(`Liquidity added successfully! Position: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... (Cost: ${actualCost.toFixed(3)} SOL)`);
       
       onClose();
       setAmount('');
       setEstimatedYAmount('');
       setRangeWidth('10');
       setStrategy('Spot');
+      setIsOneSided(false);
+      setSelectedToken('X');
       
     } catch (error) {
       console.error('Error adding liquidity:', error);
@@ -536,6 +625,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       default: return 'text-gray-400 bg-gray-500/10 border-gray-500/20';
     }
   };
+
+  // Get token names from pool
+  const getTokenNames = () => {
+    if (!pool) return { tokenX: 'Token X', tokenY: 'Token Y' };
+    const [tokenX, tokenY] = pool.name.split('-');
+    return { tokenX: tokenX.replace('WBTC', 'BTC'), tokenY };
+  };
+
+  const { tokenX, tokenY } = getTokenNames();
   
   return (
     <Dialog open={isOpen && !!pool} onOpenChange={onClose}>
@@ -577,10 +675,87 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             </div>
           )}
 
+          {/* Auto-Fill Toggle */}
+          <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg border border-border">
+            <input
+              type="checkbox"
+              id="autoFill"
+              checked={useAutoFill}
+              onChange={(e) => {
+                setUseAutoFill(e.target.checked);
+                if (e.target.checked) {
+                  setIsOneSided(false);
+                }
+              }}
+              className="rounded"
+            />
+            <label htmlFor="autoFill" className="text-sm text-white font-medium">
+              Auto-calculate balanced amount
+            </label>
+          </div>
+
+          {/* One-sided Liquidity Toggle */}
+          {!useAutoFill && (
+            <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg border border-border">
+              <input
+                type="checkbox"
+                id="oneSided"
+                checked={isOneSided}
+                onChange={(e) => setIsOneSided(e.target.checked)}
+                className="rounded"
+              />
+              <label htmlFor="oneSided" className="text-sm text-white font-medium">
+                One-sided liquidity (single token)
+              </label>
+            </div>
+          )}
+
+          {/* Token Selection for One-sided */}
+          {isOneSided && (
+            <div className="bg-[#0f0f0f] rounded-lg p-4 border border-border">
+              <p className="text-sm text-sub-text mb-3 font-medium">Select token to provide:</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  variant={selectedToken === 'X' ? "default" : "secondary"}
+                  size="sm"
+                  onClick={() => setSelectedToken('X')}
+                  className="w-full"
+                >
+                  <div className="flex flex-col items-center">
+                    <span className="font-medium">{tokenX}</span>
+                    <span className="text-xs text-sub-text mt-1">Above current price</span>
+                  </div>
+                </Button>
+                <Button
+                  variant={selectedToken === 'Y' ? "default" : "secondary"}
+                  size="sm"
+                  onClick={() => setSelectedToken('Y')}
+                  className="w-full"
+                >
+                  <div className="flex flex-col items-center">
+                    <span className="font-medium">{tokenY}</span>
+                    <span className="text-xs text-sub-text mt-1">Below current price</span>
+                  </div>
+                </Button>
+              </div>
+              <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-yellow-200">
+                    {selectedToken === 'X' 
+                      ? `Providing ${tokenX} only: Your position will be placed above the current price and will only earn fees when price rises into your range.`
+                      : `Providing ${tokenY} only: Your position will be placed below the current price and will only earn fees when price falls into your range.`
+                    }
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Amount Input */}
           <div className="space-y-3">
             <label className="text-sm text-sub-text block font-medium">
-              Amount ({pool?.name.split('-')[0].replace('WBTC', 'BTC')})
+              Amount ({isOneSided ? (selectedToken === 'X' ? tokenX : tokenY) : tokenX})
             </label>
             <div className="relative">
               <input
@@ -591,7 +766,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                 className="w-full bg-[#0f0f0f] border border-border rounded-lg p-4 text-white pr-20 text-lg font-medium"
               />
               <div className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-secondary/30 px-3 py-1.5 rounded text-sm font-medium">
-                {pool?.name.split('-')[0].replace('WBTC', 'BTC')}
+                {isOneSided ? (selectedToken === 'X' ? tokenX : tokenY) : tokenX}
               </div>
               {isCheckingBalance && (
                 <div className="absolute right-24 top-1/2 transform -translate-y-1/2">
@@ -601,25 +776,11 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             </div>
           </div>
 
-          {/* Auto-Fill Toggle */}
-          <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg border border-border">
-            <input
-              type="checkbox"
-              id="autoFill"
-              checked={useAutoFill}
-              onChange={(e) => setUseAutoFill(e.target.checked)}
-              className="rounded"
-            />
-            <label htmlFor="autoFill" className="text-sm text-white font-medium">
-              Auto-calculate balanced amount
-            </label>
-          </div>
-
           {/* Estimated Y Amount Display */}
-          {useAutoFill && estimatedYAmount && (
+          {useAutoFill && estimatedYAmount && !isOneSided && (
             <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
               <div className="text-sm text-sub-text mb-2 font-medium">
-                Estimated {pool?.name.split('-')[1]} Amount:
+                Estimated {tokenY} Amount:
               </div>
               <div className="text-white font-bold text-lg">
                 {estimatedYAmount}
@@ -642,17 +803,62 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   </div>
                 ) : (
                   <div className="grid gap-3">
-                    {/* In-Range Option (Default & Recommended) */}
+                    {/* In-Range Option (Default & Recommended) - Only show for balanced positions */}
+                    {!isOneSided && (
+                      <div 
+                        className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                          selectedRangeType === 'inRange' 
+                            ? 'border-green-500 bg-green-500/10' 
+                            : 'border-border bg-[#0f0f0f] hover:border-green-500/50'
+                        }`}
+                        onClick={() => handleRangeTypeChange('inRange')}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-lg">{rangeRecommendations.inRange.icon}</span>
+                              <div className="font-medium text-green-400 text-sm">
+                                {rangeRecommendations.inRange.label}
+                              </div>
+                              <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.inRange.riskLevel)}`}>
+                                {rangeRecommendations.inRange.riskLevel.toUpperCase()}
+                              </div>
+                            </div>
+                            <div className="text-xs text-sub-text mb-2">
+                              {rangeRecommendations.inRange.description}
+                            </div>
+                            <div className="flex items-center gap-4 text-xs">
+                              <span>Width: {rangeRecommendations.inRange.width} bins</span>
+                              <span>Cost: {rangeRecommendations.inRange.estimatedCost.toFixed(3)} SOL</span>
+                            </div>
+                          </div>
+                          {selectedRangeType === 'inRange' && (
+                            <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0" />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Conservative Option */}
                     <div 
                       className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                        selectedRangeType === 'inRange' 
-                          ? 'border-green-500 bg-green-500/10' 
-                          : 'border-border bg-[#0f0f0f] hover:border-green-500/50'
+                        selectedRangeType === 'conservative' 
+                          ? 'border-blue-500 bg-blue-500/10' 
+                          : 'border-border bg-[#0f0f0f] hover:border-blue-500/50'
                       }`}
-                      onClick={() => handleRangeTypeChange('inRange')}
+                      onClick={() => handleRangeTypeChange('conservative')}
                     >
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">{rangeRecommendations.conservative.icon}</span>
+                            <div className="font-medium text-blue-400 text-sm">
+                              {rangeRecommendations.conservative.label}
+                            </div>
+                            <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.conservative.riskLevel)}`}>
+                              {rangeRecommendations.conservative.riskLevel.toUpperCase()}
+                            </div>
+                          </div>
                           <div className="text-xs text-sub-text mb-2">
                             {rangeRecommendations.conservative.description}
                           </div>
@@ -796,6 +1002,24 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                 </div>
               )}
 
+              {/* One-sided Range Info */}
+              {isOneSided && (
+                <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <Info className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                    <div className="text-xs text-sub-text">
+                      <div className="font-medium mb-1">One-sided Position Range</div>
+                      <div>
+                        {selectedToken === 'X' 
+                          ? `Your ${tokenX} will be placed in bins above the current price. The selected range width will determine how far above.`
+                          : `Your ${tokenY} will be placed in bins below the current price. The selected range width will determine how far below.`
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Cost Summary */}
               <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
                 <div className="text-sm text-sub-text mb-3 font-medium">Position Cost Breakdown</div>
@@ -867,10 +1091,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     <div className="text-white font-medium font-mono">{pool?.address.slice(0, 8)}...</div>
                   </div>
                 </div>
-                {selectedRangeType !== 'custom' && rangeRecommendations && (
+                {selectedRangeType !== 'custom' && rangeRecommendations && !isOneSided && (
                   <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded">
                     <div className="text-green-400 text-xs font-medium">
                       💡 Using optimized range strategy - this saves on creation costs by utilizing existing price bins!
+                    </div>
+                  </div>
+                )}
+                {isOneSided && (
+                  <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded">
+                    <div className="text-blue-400 text-xs font-medium">
+                      🎯 One-sided position: You're only providing {selectedToken === 'X' ? tokenX : tokenY}. Your position will be {selectedToken === 'X' ? 'above' : 'below'} the current price.
                     </div>
                   </div>
                 )}
@@ -905,7 +1136,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                 Creating Position...
               </>
             ) : (
-              'Add Liquidity'
+              isOneSided ? `Add ${selectedToken === 'X' ? tokenX : tokenY} Liquidity` : 'Add Liquidity'
             )}
           </Button>
         </DialogFooter>
