@@ -1,9 +1,10 @@
-// Enhanced AddLiquidityModal.tsx with one-sided liquidity provision support
+// Enhanced AddLiquidityModal.tsx - Simplified for wrapped BTC only
+// Conservative approach with one-sided positions only
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Info, AlertTriangle, CheckCircle, TrendingUp, Shield, BarChart3 } from "lucide-react";
+import { Loader2, Info, AlertTriangle, CheckCircle } from "lucide-react";
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
@@ -11,7 +12,6 @@ import { BN } from 'bn.js';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { FormattedPool } from '@/lib/utils/poolUtils';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { ExistingRangeService } from '@/lib/services/existingRangeService';
 
 interface AddLiquidityModalProps {
   isOpen: boolean;
@@ -23,26 +23,17 @@ interface BalanceInfo {
   solBalance: number;
   tokenBalance: number;
   hasEnoughSol: boolean;
-  hasEnoughToken: boolean;
   estimatedSolNeeded: number;
-  estimatedTokenNeeded: number;
+  shortfall?: number;
 }
 
-// Enhanced range recommendation interface with better UI properties
-interface RangeRecommendation {
-  minBinId: number;
-  maxBinId: number;
-  centerBinId: number;
-  width: number;
-  positionCount: number;
-  totalLiquidity: number;
-  estimatedCost: number;
-  isPopular: boolean;
+interface SimplifiedRangeOption {
+  id: 'oneSided';
   label: string;
   description: string;
   icon: string;
-  riskLevel: 'low' | 'medium' | 'high';
-  isInRange: boolean; // New property to indicate if range includes current price
+  estimatedCost: number;
+  isDefault?: boolean;
 }
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
@@ -54,253 +45,71 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const { service: dlmmService } = useMeteoraDlmmService();
   const { service: positionService } = useMeteoraPositionService();
   
-  // Basic form state
-  const [amount, setAmount] = useState('');
-  const [rangeWidth, setRangeWidth] = useState('10');
+  // Simplified state - only wrapped BTC amount needed
+  const [btcAmount, setBtcAmount] = useState('');
+  const [selectedOption, setSelectedOption] = useState<'oneSided'>('oneSided');
   const [isLoading, setIsLoading] = useState(false);
-  const [strategy, setStrategy] = useState<string>('Spot');
-  const [useAutoFill, setUseAutoFill] = useState(true);
-  const [estimatedYAmount, setEstimatedYAmount] = useState<string>('');
-  
-  // One-sided liquidity state
-  const [isOneSided, setIsOneSided] = useState(false);
-  const [selectedToken, setSelectedToken] = useState<'X' | 'Y'>('X');
-  
-  // Balance validation state
   const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
+  const [currentBinId, setCurrentBinId] = useState<number | null>(null);
 
-  // Enhanced range recommendation state with better default selection
-  const [rangeRecommendations, setRangeRecommendations] = useState<{
-    inRange: RangeRecommendation;
-    conservative: RangeRecommendation;
-    balanced: RangeRecommendation;
-    aggressive: RangeRecommendation;
-    all: RangeRecommendation[];
-  } | null>(null);
-  const [selectedRangeType, setSelectedRangeType] = useState<'inRange' | 'conservative' | 'balanced' | 'aggressive' | 'custom'>('inRange');
-  const [isLoadingRanges, setIsLoadingRanges] = useState(false);
-
-  // Services
-  const existingRangeService = useMemo(() => 
-    new ExistingRangeService(new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com')), 
-    []
-  );
-
-  // Enhanced load existing ranges with in-range focus
-  const loadExistingRanges = async () => {
-    if (!pool) return;
-    
-    setIsLoadingRanges(true);
-    try {
-      // Get current price information first
-      const dlmmPool = await dlmmService.initializePool(pool.address);
-      const activeBin = await dlmmPool.getActiveBin();
-      const currentBinId = activeBin.binId;
-      
-      console.log('Current active bin ID:', currentBinId);
-      
-      // Create enhanced recommendations with current price focus
-      const enhancedRecommendations = {
-        // IN-RANGE: Tight range around current price (DEFAULT)
-        inRange: {
-          minBinId: currentBinId - 5,
-          maxBinId: currentBinId + 5,
-          centerBinId: currentBinId,
-          width: 10,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.057,
-          isPopular: true,
-          isInRange: true,
-          label: '🎯 In-Range (Recommended)',
-          description: 'Tight range around current price • Active earning • Lower cost',
-          icon: '🎯',
-          riskLevel: 'medium' as const
-        },
-        
-        // CONSERVATIVE: Wider range for stability
-        conservative: {
-          minBinId: currentBinId - 15,
-          maxBinId: currentBinId + 15,
-          centerBinId: currentBinId,
-          width: 30,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.082,
-          isPopular: false,
-          isInRange: true,
-          label: '🛡️ Conservative',
-          description: 'Wide range • Lower risk • Stable returns • May cost more',
-          icon: '🛡️',
-          riskLevel: 'low' as const
-        },
-        
-        // BALANCED: Medium range for balanced approach
-        balanced: {
-          minBinId: currentBinId - 10,
-          maxBinId: currentBinId + 10,
-          centerBinId: currentBinId,
-          width: 20,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.070,
-          isPopular: true,
-          isInRange: true,
-          label: '⚖️ Balanced',
-          description: 'Medium range • Good liquidity coverage • Moderate cost',
-          icon: '⚖️',
-          riskLevel: 'medium' as const
-        },
-        
-        // AGGRESSIVE: Very tight range for maximum fees
-        aggressive: {
-          minBinId: currentBinId - 3,
-          maxBinId: currentBinId + 3,
-          centerBinId: currentBinId,
-          width: 6,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.057,
-          isPopular: false,
-          isInRange: true,
-          label: '🚀 Aggressive',
-          description: 'Very tight range • Maximum fees • Higher risk • Lowest cost',
-          icon: '🚀',
-          riskLevel: 'high' as const
-        },
-        
-        all: []
-      };
-      
-      // Try to get actual existing ranges for cost optimization
-      try {
-        const existingRanges = await existingRangeService.findExistingRanges(pool.address);
-        
-        // Update costs based on existing ranges if available
-        if (existingRanges.cheapest) {
-          // Find the closest existing range to our in-range recommendation
-          const inRangeOverlap = Math.max(0, 
-            Math.min(enhancedRecommendations.inRange.maxBinId, existingRanges.cheapest.maxBinId) -
-            Math.max(enhancedRecommendations.inRange.minBinId, existingRanges.cheapest.minBinId)
-          );
-          
-          if (inRangeOverlap > 0) {
-            enhancedRecommendations.inRange.estimatedCost = existingRanges.cheapest.estimatedCost;
-            enhancedRecommendations.inRange.description = 'Tight range around current price • Uses existing bins • Very low cost';
-          }
-        }
-      } catch (error) {
-        console.warn('Could not load existing ranges, using estimates:', error);
-      }
-      
-      setRangeRecommendations(enhancedRecommendations);
-      
-      // Default to in-range selection
-      setSelectedRangeType('inRange');
-      setRangeWidth(enhancedRecommendations.inRange.width.toString());
-      
-    } catch (error) {
-      console.error('Error loading ranges:', error);
-      
-      // Fallback recommendations
-      const fallbackRecommendations = {
-        inRange: {
-          minBinId: 0,
-          maxBinId: 10,
-          centerBinId: 5,
-          width: 10,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.057,
-          isPopular: true,
-          isInRange: true,
-          label: '🎯 In-Range (Recommended)',
-          description: 'Default tight range around current price',
-          icon: '🎯',
-          riskLevel: 'medium' as const
-        },
-        conservative: {
-          minBinId: -15,
-          maxBinId: 25,
-          centerBinId: 5,
-          width: 40,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.150,
-          isPopular: false,
-          isInRange: true,
-          label: '🛡️ Conservative',
-          description: 'Wide range for stability',
-          icon: '🛡️',
-          riskLevel: 'low' as const
-        },
-        balanced: {
-          minBinId: -5,
-          maxBinId: 15,
-          centerBinId: 5,
-          width: 20,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.090,
-          isPopular: true,
-          isInRange: true,
-          label: '⚖️ Balanced',
-          description: 'Medium range for balanced approach',
-          icon: '⚖️',
-          riskLevel: 'medium' as const
-        },
-        aggressive: {
-          minBinId: 2,
-          maxBinId: 8,
-          centerBinId: 5,
-          width: 6,
-          positionCount: 0,
-          totalLiquidity: 0,
-          estimatedCost: 0.057,
-          isPopular: false,
-          isInRange: true,
-          label: '🚀 Aggressive',
-          description: 'Very tight range for maximum fees',
-          icon: '🚀',
-          riskLevel: 'high' as const
-        },
-        all: []
-      };
-      
-      setRangeRecommendations(fallbackRecommendations);
-    } finally {
-      setIsLoadingRanges(false);
-    }
+  // Get token names from pool
+  const getTokenNames = () => {
+    if (!pool) return { tokenX: 'zBTC', tokenY: 'SOL' };
+    const [tokenX, tokenY] = pool.name.split('-');
+    return { 
+      tokenX: tokenX.replace('WBTC', 'wBTC'), 
+      tokenY 
+    };
   };
 
-  // Load existing ranges when modal opens
+  const { tokenX, tokenY } = getTokenNames();
+
+  // Simplified range options - only one-sided BTC positions
+  const rangeOptions: SimplifiedRangeOption[] = [
+    {
+      id: 'oneSided',
+      label: `⚡ One-Sided Position`, 
+      description: `Single-token position • Only ${tokenX} needed • Earns when price rises • Conservative approach`,
+      icon: '⚡',
+      estimatedCost: 0.057, // Base position rent only
+      isDefault: true
+    }
+  ];
+
+  // Get current active bin on modal open
   useEffect(() => {
     if (isOpen && pool) {
-      loadExistingRanges();
+      loadCurrentBin();
     }
   }, [isOpen, pool]);
 
-  // Reset one-sided settings when useAutoFill changes
+  // Check balances when amount changes
   useEffect(() => {
-    if (useAutoFill) {
-      setIsOneSided(false);
-    }
-  }, [useAutoFill]);
-
-  // Check user balances when amount changes
-  useEffect(() => {
-    if (amount && parseFloat(amount) > 0 && publicKey && pool) {
+    if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool) {
       checkUserBalances();
     } else {
       setBalanceInfo(null);
       setValidationError('');
     }
-  }, [amount, publicKey, pool, isOneSided, selectedToken]);
+  }, [btcAmount, publicKey, pool]);
+
+  const loadCurrentBin = async () => {
+    if (!pool) return;
+    
+    try {
+      const dlmmPool = await dlmmService.initializePool(pool.address);
+      const activeBin = await dlmmPool.getActiveBin();
+      setCurrentBinId(activeBin.binId);
+      console.log('Current active bin ID:', activeBin.binId);
+    } catch (error) {
+      console.error('Error loading current bin:', error);
+    }
+  };
 
   const checkUserBalances = async () => {
-    if (!publicKey || !pool || !amount || parseFloat(amount) <= 0) return;
+    if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0) return;
 
     setIsCheckingBalance(true);
     setValidationError('');
@@ -313,57 +122,30 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       // Get SOL balance
       const solBalanceLamports = await connection.getBalance(publicKey);
       const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
-
-      // Estimate SOL needed (including transaction fees and possible wrapped SOL)
-      const amountValue = parseFloat(amount);
       
-      // Get cost estimate based on selected range
-      let estimatedCost = 0.057; // Default position rent
-      if (selectedRangeType !== 'custom' && rangeRecommendations) {
-        estimatedCost = rangeRecommendations[selectedRangeType].estimatedCost;
-      } else {
-        // Custom range might need new binArrays
-        estimatedCost = 0.207; // Conservative estimate for custom ranges
-      }
+      const btcAmountValue = parseFloat(btcAmount);
       
-      // Calculate estimated SOL needed based on whether it's one-sided or not
-      let estimatedSolNeeded = estimatedCost + 0.01; // Base cost + buffer for fees
+      // Calculate estimated SOL needed for one-sided position only
+      let estimatedSolNeeded = 0.057 + 0.015; // Base position rent + transaction fees
       
-      if (isOneSided) {
-        // For one-sided, we only need the token we're providing
-        if (selectedToken === 'Y') {
-          // Providing SOL
-          estimatedSolNeeded += amountValue;
-        }
-        // If providing token X (zBTC), we don't need additional SOL for liquidity
-      } else {
-        // For balanced positions, calculate based on auto-fill
-        estimatedSolNeeded += amountValue; // Assume we need SOL amount
-        
-        // Get estimated Y amount for balanced position
-        let estimatedYValue = 0;
-        if (useAutoFill && estimatedYAmount) {
-          estimatedYValue = parseFloat(estimatedYAmount);
-        }
-      }
-
+      // Add buffer for potential binArray creation (conservative estimate)
+      estimatedSolNeeded += 0.075; // One binArray creation cost
+      
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
-      const hasEnoughToken = true; // Placeholder - implement actual token balance check
+      const shortfall = hasEnoughSol ? 0 : estimatedSolNeeded - solBalance;
 
       const balanceInfo: BalanceInfo = {
         solBalance,
-        tokenBalance: 0, // Placeholder
+        tokenBalance: 0, // TODO: Implement wrapped BTC balance checking
         hasEnoughSol,
-        hasEnoughToken,
         estimatedSolNeeded,
-        estimatedTokenNeeded: isOneSided && selectedToken === 'X' ? amountValue : 0
+        shortfall
       };
 
       setBalanceInfo(balanceInfo);
 
       // Set validation errors
       if (!hasEnoughSol) {
-        const shortfall = estimatedSolNeeded - solBalance;
         setValidationError(
           `Insufficient SOL balance. You need ${shortfall.toFixed(4)} more SOL to complete this transaction.`
         );
@@ -380,234 +162,97 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     if (/^[0-9]*\.?[0-9]*$/.test(value) || value === '') {
-      setAmount(value);
-      if (!isOneSided) {
-        calculateEstimatedYAmount(value);
-      }
-    }
-  };
-  
-  const calculateEstimatedYAmount = async (xAmount: string) => {
-    if (!pool || !xAmount || parseFloat(xAmount) <= 0 || !useAutoFill || isOneSided) {
-      setEstimatedYAmount('');
-      return;
-    }
-
-    try {
-      const activeBin = await dlmmService.getActiveBin(pool.address);
-      const decimals = 9;
-      const bnAmount = new BN(parseFloat(xAmount) * Math.pow(10, decimals));
-      const rangeWidthNum = parseInt(rangeWidth);
-      const minBinId = activeBin.binId - rangeWidthNum;
-      const maxBinId = activeBin.binId + rangeWidthNum;
-      
-      const estimatedY = dlmmService.calculateBalancedYAmount(
-        activeBin.binId,
-        parseInt(pool.binStep),
-        bnAmount,
-        activeBin.xAmount,
-        activeBin.yAmount,
-        minBinId,
-        maxBinId,
-        getStrategyType()
-      );
-      
-      const estimatedYFormatted = (estimatedY.toNumber() / Math.pow(10, decimals)).toFixed(6);
-      setEstimatedYAmount(estimatedYFormatted);
-      
-    } catch (error) {
-      console.error('Error calculating estimated Y amount:', error);
-      setEstimatedYAmount('Auto-calculation failed');
-    }
-  };
-
-  const getStrategyType = (): StrategyType => {
-    switch (strategy) {
-      case 'BidAsk': return StrategyType.BidAsk;
-      case 'Curve': return StrategyType.Curve;
-      case 'Spot':
-      default: return StrategyType.Spot;
-    }
-  };
-
-  // Enhanced range type change handler
-  const handleRangeTypeChange = (type: 'inRange' | 'conservative' | 'balanced' | 'aggressive' | 'custom') => {
-    setSelectedRangeType(type);
-    
-    if (type !== 'custom' && rangeRecommendations) {
-      const selectedRange = rangeRecommendations[type];
-      setRangeWidth(selectedRange.width.toString());
+      setBtcAmount(value);
     }
   };
 
   const handleAddLiquidity = async () => {
-    if (!pool || !publicKey || !amount || parseFloat(amount) <= 0) return;
+    if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId) return;
 
-    // Enhanced validation before any async operations
-    if (balanceInfo) {
-      if (!balanceInfo.hasEnoughSol) {
-        alert(validationError || 'Insufficient SOL balance to complete transaction');
-        return;
-      }
-    }
-
-    // Additional pre-flight balance check
-    try {
-      const connection = new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
-      const currentBalance = await connection.getBalance(publicKey);
-      const currentSolBalance = currentBalance / LAMPORTS_PER_SOL;
-      
-      let estimatedCost = 0.057;
-      if (selectedRangeType !== 'custom' && rangeRecommendations) {
-        estimatedCost = rangeRecommendations[selectedRangeType].estimatedCost;
-      } else {
-        estimatedCost = 0.207; // Conservative estimate for custom ranges
-      }
-      
-      const amountValue = parseFloat(amount);
-      const requiredSol = isOneSided && selectedToken === 'X' 
-        ? estimatedCost + 0.01 // Only need cost for position + fees if providing zBTC
-        : amountValue + estimatedCost + 0.01; // Need amount + cost + fees if providing SOL
-      
-      if (currentSolBalance < requiredSol) {
-        alert(`Real-time balance check failed. Current SOL balance: ${currentSolBalance.toFixed(4)}, Required: ${requiredSol.toFixed(4)}`);
-        return;
-      }
-    } catch (error) {
-      console.error('Balance verification failed:', error);
-      alert('Unable to verify current balance. Please try again.');
+    // Enhanced validation
+    if (balanceInfo && !balanceInfo.hasEnoughSol) {
+      alert(validationError || 'Insufficient SOL balance to complete transaction');
       return;
     }
-    
+
     setIsLoading(true);
     
     try {
-      const activeBin = await dlmmService.getActiveBin(pool.address);
-      const decimals = 9;
-      const bnAmount = new BN(parseFloat(amount) * Math.pow(10, decimals));
+      // Determine decimals based on token type
+      let decimals = 8; // Default for most BTC tokens
       
-      if (isOneSided) {
-        // One-sided liquidity provision
-        let adjustedMinBinId: number;
-        let adjustedMaxBinId: number;
-        
-        // Parse token names from pool name
-        const [tokenXName, tokenYName] = pool.name.split('-');
-        const isProvidingTokenX = selectedToken === 'X';
-        
-        if (isProvidingTokenX) {
-          // Providing token X (e.g., zBTC) - position must be above current price
-          adjustedMinBinId = activeBin.binId + 1;
-          adjustedMaxBinId = activeBin.binId + parseInt(rangeWidth);
-          
-          console.log(`Creating one-sided position for ${tokenXName} above current price: bins ${adjustedMinBinId} to ${adjustedMaxBinId}`);
-        } else {
-          // Providing token Y (e.g., SOL) - position must be below current price
-          adjustedMinBinId = activeBin.binId - parseInt(rangeWidth);
-          adjustedMaxBinId = activeBin.binId - 1;
-          
-          console.log(`Creating one-sided position for ${tokenYName} below current price: bins ${adjustedMinBinId} to ${adjustedMaxBinId}`);
-        }
-        
-        const result = await positionService.createOneSidedPosition({
-          poolAddress: pool.address,
-          userPublicKey: publicKey,
-          totalXAmount: isProvidingTokenX ? bnAmount : new BN(0),
-          totalYAmount: isProvidingTokenX ? new BN(0) : bnAmount,
-          minBinId: adjustedMinBinId,
-          maxBinId: adjustedMaxBinId,
-          strategyType: getStrategyType(),
-          useAutoFill: false // Always false for one-sided
-        }, isProvidingTokenX);
-        
-        if (Array.isArray(result.transaction)) {
-          for (const tx of result.transaction) {
-            const signature = await sendTransaction(tx, dlmmService.connection, {
-              signers: [result.positionKeypair]
-            });
-            console.log('Transaction signature:', signature);
-          }
-        } else {
-          const signature = await sendTransaction(result.transaction, dlmmService.connection, {
-            signers: [result.positionKeypair]
-          });
-          console.log('Transaction signature:', signature);
-        }
-        
-        // Show success message with details
-        const actualCost = result.estimatedCost?.total || 0.057;
-        const tokenName = isProvidingTokenX ? tokenXName : tokenYName;
-        alert(`One-sided liquidity added successfully! 
-Token: ${tokenName}
-Position: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... 
-Cost: ${actualCost.toFixed(3)} SOL`);
-        
-      } else {
-        // Balanced position (existing logic)
-        let minBinId, maxBinId;
-        
-        // Use selected range from recommendations or custom
-        if (selectedRangeType !== 'custom' && rangeRecommendations) {
-          const selectedRange = rangeRecommendations[selectedRangeType];
-          minBinId = selectedRange.minBinId;
-          maxBinId = selectedRange.maxBinId;
-          
-          console.log(`Using ${selectedRangeType} range: bins ${minBinId} to ${maxBinId}, estimated cost: ${selectedRange.estimatedCost} SOL`);
-        } else {
-          // Custom range (may cost more)
-          const rangeWidthNum = parseInt(rangeWidth);
-          minBinId = activeBin.binId - rangeWidthNum;
-          maxBinId = activeBin.binId + rangeWidthNum;
-          
-          console.log(`Using custom range: bins ${minBinId} to ${maxBinId} (may require new binArrays)`);
-        }
-        
-        const result = await positionService.createBalancedPosition({
-          poolAddress: pool.address,
-          userPublicKey: publicKey,
-          totalXAmount: bnAmount,
-          minBinId,
-          maxBinId,
-          strategyType: getStrategyType(),
-          useAutoFill: useAutoFill
-        });
-        
-        if (Array.isArray(result.transaction)) {
-          for (const tx of result.transaction) {
-            const signature = await sendTransaction(tx, dlmmService.connection, {
-              signers: [result.positionKeypair]
-            });
-            console.log('Transaction signature:', signature);
-          }
-        } else {
-          const signature = await sendTransaction(result.transaction, dlmmService.connection, {
-            signers: [result.positionKeypair]
-          });
-          console.log('Transaction signature:', signature);
-        }
-        
-        // Show success message with cost information
-        const actualCost = result.estimatedCost?.total || 0.057;
-        alert(`Balanced liquidity added successfully! Position: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... (Cost: ${actualCost.toFixed(3)} SOL)`);
+      // Special handling for different wrapped BTC tokens
+      if (tokenX.toLowerCase().includes('wbtc')) {
+        decimals = 8; // wBTC uses 8 decimals
+      } else if (tokenX.toLowerCase().includes('zbtc')) {
+        decimals = 8; // zBTC uses 8 decimals  
+      } else if (tokenX.toLowerCase().includes('cbbtc')) {
+        decimals = 8; // cbBTC uses 8 decimals
       }
       
+      const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
+      
+      // Create one-sided wrapped BTC position (above current price)
+      const result = await positionService.createOneSidedPosition({
+        poolAddress: pool.address,
+        userPublicKey: publicKey,
+        totalXAmount: bnAmount, // Wrapped BTC amount
+        totalYAmount: new BN(0), // No SOL needed for liquidity
+        minBinId: currentBinId + 1, // Start above current price
+        maxBinId: currentBinId + 10, // 10 bins above current price
+        strategyType: StrategyType.Spot,
+        useAutoFill: false
+      }, true); // true = providing token X (wrapped BTC)
+      
+      if (Array.isArray(result.transaction)) {
+        for (const tx of result.transaction) {
+          const signature = await sendTransaction(tx, dlmmService.connection, {
+            signers: [result.positionKeypair]
+          });
+          console.log('Transaction signature:', signature);
+        }
+      } else {
+        const signature = await sendTransaction(result.transaction, dlmmService.connection, {
+          signers: [result.positionKeypair]
+        });
+        console.log('Transaction signature:', signature);
+      }
+      
+      const actualCost = result.estimatedCost?.total || 0.057;
+      alert(`${tokenX}-only position created successfully! 
+
+Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}...
+Amount: ${btcAmount} ${tokenX}
+Range: Bins ${currentBinId + 1} to ${currentBinId + 10} (above current price)
+Cost: ${actualCost.toFixed(3)} SOL
+
+Your ${tokenX} will earn fees when the price rises into your range.
+This is a conservative, single-token approach perfect for upside exposure.`);
+      
       onClose();
-      setAmount('');
-      setEstimatedYAmount('');
-      setRangeWidth('10');
-      setStrategy('Spot');
-      setIsOneSided(false);
-      setSelectedToken('X');
+      setBtcAmount('');
       
     } catch (error) {
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
-      // Enhanced error handling
+      // Enhanced error handling for common issues
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        alert('Insufficient funds. Please check your SOL and token balances.');
+        alert(`Insufficient SOL balance detected. 
+
+What you need SOL for:
+• Position rent: 0.057 SOL (refundable when you close position)
+• BinArray creation: ~0.075 SOL (one-time cost for new price ranges)  
+• Transaction fees: ~0.015 SOL
+
+Total needed: ~0.147 SOL minimum
+
+This SOL is NOT used for liquidity - it's just for account creation and fees.
+Your wrapped Bitcoin tokens (${tokenX}) provide the actual liquidity.
+
+Please add more SOL to your wallet and try again.`);
       } else if (errorMessage.includes('Transaction simulation failed')) {
-        alert('Transaction failed during simulation. This usually means insufficient funds or invalid parameters.');
+        alert('Transaction failed during simulation. This usually means insufficient funds or the selected price range requires expensive bin creation. Try again with more SOL.');
       } else {
         alert(`Error adding liquidity: ${errorMessage}`);
       }
@@ -615,33 +260,14 @@ Cost: ${actualCost.toFixed(3)} SOL`);
       setIsLoading(false);
     }
   };
-
-  // Get risk level color
-  const getRiskLevelColor = (riskLevel: string) => {
-    switch (riskLevel) {
-      case 'low': return 'text-green-400 bg-green-500/10 border-green-500/20';
-      case 'medium': return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
-      case 'high': return 'text-red-400 bg-red-500/10 border-red-500/20';
-      default: return 'text-gray-400 bg-gray-500/10 border-gray-500/20';
-    }
-  };
-
-  // Get token names from pool
-  const getTokenNames = () => {
-    if (!pool) return { tokenX: 'Token X', tokenY: 'Token Y' };
-    const [tokenX, tokenY] = pool.name.split('-');
-    return { tokenX: tokenX.replace('WBTC', 'BTC'), tokenY };
-  };
-
-  const { tokenX, tokenY } = getTokenNames();
   
   return (
     <Dialog open={isOpen && !!pool} onOpenChange={onClose}>
-      <DialogContent className="bg-[#161616] border-border text-white max-w-lg mx-auto max-h-[90vh] overflow-y-auto" aria-describedby="add-liquidity-description">
+      <DialogContent className="bg-[#161616] border-border text-white max-w-lg mx-auto max-h-[90vh] overflow-y-auto">
         <DialogHeader className="space-y-3">
-          <DialogTitle className="text-white text-xl">Add Liquidity to {pool?.name}</DialogTitle>
-          <DialogDescription id="add-liquidity-description" className="text-sm text-sub-text">
-            Add liquidity to this pool to earn fees from trading activity
+          <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity</DialogTitle>
+          <DialogDescription className="text-sm text-sub-text">
+            Conservative wrapped Bitcoin liquidity - Single-token position above current price
           </DialogDescription>
         </DialogHeader>
         
@@ -657,10 +283,14 @@ Cost: ${actualCost.toFixed(3)} SOL`);
                     {balanceInfo.solBalance.toFixed(4)} SOL
                   </span>
                 </div>
-                {balanceInfo.estimatedSolNeeded > 0 && (
+                <div className="flex justify-between items-center text-sm">
+                  <span>SOL Needed:</span>
+                  <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
+                </div>
+                {balanceInfo.shortfall && balanceInfo.shortfall > 0 && (
                   <div className="flex justify-between items-center text-sm">
-                    <span>SOL Needed:</span>
-                    <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
+                    <span>Shortfall:</span>
+                    <span className="text-red-400 font-medium">-{balanceInfo.shortfall.toFixed(4)} SOL</span>
                   </div>
                 )}
               </div>
@@ -675,98 +305,21 @@ Cost: ${actualCost.toFixed(3)} SOL`);
             </div>
           )}
 
-          {/* Auto-Fill Toggle */}
-          <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg border border-border">
-            <input
-              type="checkbox"
-              id="autoFill"
-              checked={useAutoFill}
-              onChange={(e) => {
-                setUseAutoFill(e.target.checked);
-                if (e.target.checked) {
-                  setIsOneSided(false);
-                }
-              }}
-              className="rounded"
-            />
-            <label htmlFor="autoFill" className="text-sm text-white font-medium">
-              Auto-calculate balanced amount
-            </label>
-          </div>
-
-          {/* One-sided Liquidity Toggle */}
-          {!useAutoFill && (
-            <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg border border-border">
-              <input
-                type="checkbox"
-                id="oneSided"
-                checked={isOneSided}
-                onChange={(e) => setIsOneSided(e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="oneSided" className="text-sm text-white font-medium">
-                One-sided liquidity (single token)
-              </label>
-            </div>
-          )}
-
-          {/* Token Selection for One-sided */}
-          {isOneSided && (
-            <div className="bg-[#0f0f0f] rounded-lg p-4 border border-border">
-              <p className="text-sm text-sub-text mb-3 font-medium">Select token to provide:</p>
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant={selectedToken === 'X' ? "default" : "secondary"}
-                  size="sm"
-                  onClick={() => setSelectedToken('X')}
-                  className="w-full"
-                >
-                  <div className="flex flex-col items-center">
-                    <span className="font-medium">{tokenX}</span>
-                    <span className="text-xs text-sub-text mt-1">Above current price</span>
-                  </div>
-                </Button>
-                <Button
-                  variant={selectedToken === 'Y' ? "default" : "secondary"}
-                  size="sm"
-                  onClick={() => setSelectedToken('Y')}
-                  className="w-full"
-                >
-                  <div className="flex flex-col items-center">
-                    <span className="font-medium">{tokenY}</span>
-                    <span className="text-xs text-sub-text mt-1">Below current price</span>
-                  </div>
-                </Button>
-              </div>
-              <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                  <div className="text-xs text-yellow-200">
-                    {selectedToken === 'X' 
-                      ? `Providing ${tokenX} only: Your position will be placed above the current price and will only earn fees when price rises into your range.`
-                      : `Providing ${tokenY} only: Your position will be placed below the current price and will only earn fees when price falls into your range.`
-                    }
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Amount Input */}
+          {/* Wrapped BTC Amount Input */}
           <div className="space-y-3">
             <label className="text-sm text-sub-text block font-medium">
-              Amount ({isOneSided ? (selectedToken === 'X' ? tokenX : tokenY) : tokenX})
+              {tokenX} Amount to Provide
             </label>
             <div className="relative">
               <input
                 type="text"
-                value={amount}
+                value={btcAmount}
                 onChange={handleAmountChange}
                 placeholder="0.0"
                 className="w-full bg-[#0f0f0f] border border-border rounded-lg p-4 text-white pr-20 text-lg font-medium"
               />
               <div className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-secondary/30 px-3 py-1.5 rounded text-sm font-medium">
-                {isOneSided ? (selectedToken === 'X' ? tokenX : tokenY) : tokenX}
+                {tokenX}
               </div>
               {isCheckingBalance && (
                 <div className="absolute right-24 top-1/2 transform -translate-y-1/2">
@@ -776,336 +329,86 @@ Cost: ${actualCost.toFixed(3)} SOL`);
             </div>
           </div>
 
-          {/* Estimated Y Amount Display */}
-          {useAutoFill && estimatedYAmount && !isOneSided && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
-              <div className="text-sm text-sub-text mb-2 font-medium">
-                Estimated {tokenY} Amount:
-              </div>
-              <div className="text-white font-bold text-lg">
-                {estimatedYAmount}
-              </div>
+          {/* Simplified Position Type Display */}
+          <div className="space-y-4">
+            <label className="text-sm text-sub-text block font-medium">
+              💡 Conservative Position Strategy
+            </label>
+            
+            <div className="grid gap-3">
+              {rangeOptions.map((option) => (
+                <div 
+                  key={option.id}
+                  className="p-4 border border-primary bg-primary/10 rounded-lg"
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-lg">{option.icon}</span>
+                        <div className="font-medium text-primary text-sm">
+                          {option.label}
+                        </div>
+                        <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30">
+                          SELECTED
+                        </div>
+                      </div>
+                      <div className="text-xs text-sub-text mb-2">
+                        {option.description}
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
+                        <span>Base Cost: {option.estimatedCost.toFixed(3)} SOL</span>
+                        <span>Risk: Low</span>
+                        <span>Strategy: Conservative</span>
+                      </div>
+                    </div>
+                    <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-
-          {/* Enhanced Range Recommendations */}
-          {rangeRecommendations && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-sub-text block mb-3 font-medium">
-                  💡 Position Range Strategy
-                </label>
-                
-                {isLoadingRanges ? (
-                  <div className="flex items-center justify-center p-6">
-                    <Loader2 className="h-5 w-5 animate-spin text-primary mr-3" />
-                    <span className="text-sm">Loading optimal ranges...</span>
-                  </div>
-                ) : (
-                  <div className="grid gap-3">
-                    {/* In-Range Option (Default & Recommended) - Only show for balanced positions */}
-                    {!isOneSided && (
-                      <div 
-                        className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                          selectedRangeType === 'inRange' 
-                            ? 'border-green-500 bg-green-500/10' 
-                            : 'border-border bg-[#0f0f0f] hover:border-green-500/50'
-                        }`}
-                        onClick={() => handleRangeTypeChange('inRange')}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-lg">{rangeRecommendations.inRange.icon}</span>
-                              <div className="font-medium text-green-400 text-sm">
-                                {rangeRecommendations.inRange.label}
-                              </div>
-                              <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.inRange.riskLevel)}`}>
-                                {rangeRecommendations.inRange.riskLevel.toUpperCase()}
-                              </div>
-                            </div>
-                            <div className="text-xs text-sub-text mb-2">
-                              {rangeRecommendations.inRange.description}
-                            </div>
-                            <div className="flex items-center gap-4 text-xs">
-                              <span>Width: {rangeRecommendations.inRange.width} bins</span>
-                              <span>Cost: {rangeRecommendations.inRange.estimatedCost.toFixed(3)} SOL</span>
-                            </div>
-                          </div>
-                          {selectedRangeType === 'inRange' && (
-                            <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0" />
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Conservative Option */}
-                    <div 
-                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                        selectedRangeType === 'conservative' 
-                          ? 'border-blue-500 bg-blue-500/10' 
-                          : 'border-border bg-[#0f0f0f] hover:border-blue-500/50'
-                      }`}
-                      onClick={() => handleRangeTypeChange('conservative')}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-lg">{rangeRecommendations.conservative.icon}</span>
-                            <div className="font-medium text-blue-400 text-sm">
-                              {rangeRecommendations.conservative.label}
-                            </div>
-                            <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.conservative.riskLevel)}`}>
-                              {rangeRecommendations.conservative.riskLevel.toUpperCase()}
-                            </div>
-                          </div>
-                          <div className="text-xs text-sub-text mb-2">
-                            {rangeRecommendations.conservative.description}
-                          </div>
-                          <div className="flex items-center gap-4 text-xs">
-                            <span>Width: {rangeRecommendations.conservative.width} bins</span>
-                            <span>Cost: {rangeRecommendations.conservative.estimatedCost.toFixed(3)} SOL</span>
-                          </div>
-                        </div>
-                        {selectedRangeType === 'conservative' && (
-                          <CheckCircle className="h-5 w-5 text-blue-400 flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Balanced Option */}
-                    <div 
-                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                        selectedRangeType === 'balanced' 
-                          ? 'border-primary bg-primary/10' 
-                          : 'border-border bg-[#0f0f0f] hover:border-primary/50'
-                      }`}
-                      onClick={() => handleRangeTypeChange('balanced')}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-lg">{rangeRecommendations.balanced.icon}</span>
-                            <div className="font-medium text-primary text-sm">
-                              {rangeRecommendations.balanced.label}
-                            </div>
-                            <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.balanced.riskLevel)}`}>
-                              {rangeRecommendations.balanced.riskLevel.toUpperCase()}
-                            </div>
-                          </div>
-                          <div className="text-xs text-sub-text mb-2">
-                            {rangeRecommendations.balanced.description}
-                          </div>
-                          <div className="flex items-center gap-4 text-xs">
-                            <span>Width: {rangeRecommendations.balanced.width} bins</span>
-                            <span>Cost: {rangeRecommendations.balanced.estimatedCost.toFixed(3)} SOL</span>
-                          </div>
-                        </div>
-                        {selectedRangeType === 'balanced' && (
-                          <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Aggressive Option */}
-                    <div 
-                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                        selectedRangeType === 'aggressive' 
-                          ? 'border-red-500 bg-red-500/10' 
-                          : 'border-border bg-[#0f0f0f] hover:border-red-500/50'
-                      }`}
-                      onClick={() => handleRangeTypeChange('aggressive')}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-lg">{rangeRecommendations.aggressive.icon}</span>
-                            <div className="font-medium text-red-400 text-sm">
-                              {rangeRecommendations.aggressive.label}
-                            </div>
-                            <div className={`px-2 py-1 rounded-full text-xs border ${getRiskLevelColor(rangeRecommendations.aggressive.riskLevel)}`}>
-                              {rangeRecommendations.aggressive.riskLevel.toUpperCase()}
-                            </div>
-                          </div>
-                          <div className="text-xs text-sub-text mb-2">
-                            {rangeRecommendations.aggressive.description}
-                          </div>
-                          <div className="flex items-center gap-4 text-xs">
-                            <span>Width: {rangeRecommendations.aggressive.width} bins</span>
-                            <span>Cost: {rangeRecommendations.aggressive.estimatedCost.toFixed(3)} SOL</span>
-                          </div>
-                        </div>
-                        {selectedRangeType === 'aggressive' && (
-                          <CheckCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Custom Option */}
-                    <div 
-                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                        selectedRangeType === 'custom' 
-                          ? 'border-yellow-500 bg-yellow-500/10' 
-                          : 'border-border bg-[#0f0f0f] hover:border-yellow-500/50'
-                      }`}
-                      onClick={() => handleRangeTypeChange('custom')}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-lg">⚙️</span>
-                            <div className="font-medium text-yellow-400 text-sm">Custom Range</div>
-                            <div className="px-2 py-1 rounded-full text-xs border text-gray-400 bg-gray-500/10 border-gray-500/20">
-                              CUSTOM
-                            </div>
-                          </div>
-                          <div className="text-xs text-sub-text mb-2">
-                            Set your own range (may cost more if bins don't exist)
-                          </div>
-                          <div className="flex items-center gap-4 text-xs">
-                            <span>Custom width • Variable cost</span>
-                          </div>
-                        </div>
-                        {selectedRangeType === 'custom' && (
-                          <CheckCircle className="h-5 w-5 text-yellow-400 flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Custom Range Input (only show when custom is selected) */}
-              {selectedRangeType === 'custom' && (
-                <div className="bg-[#0f0f0f] border border-yellow-500/30 rounded-lg p-4">
-                  <label className="text-sm text-sub-text block mb-2 font-medium">
-                    Custom Range Width (bins on each side)
-                  </label>
-                  <input
-                    type="number"
-                    value={rangeWidth}
-                    onChange={(e) => setRangeWidth(e.target.value)}
-                    min="1"
-                    max="50"
-                    className="w-full bg-[#161616] border border-border rounded-lg p-3 text-white"
-                    placeholder="Enter range width"
-                  />
-                  <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                      <div className="text-xs text-yellow-200">
-                        <div className="font-medium mb-1">Custom Range Warning</div>
-                        <div>Custom ranges may require creating new price bins, which can cost an additional ~0.15 SOL. Consider using recommended ranges for lower costs.</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* One-sided Range Info */}
-              {isOneSided && (
-                <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
-                  <div className="flex items-start gap-2">
-                    <Info className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                    <div className="text-xs text-sub-text">
-                      <div className="font-medium mb-1">One-sided Position Range</div>
-                      <div>
-                        {selectedToken === 'X' 
-                          ? `Your ${tokenX} will be placed in bins above the current price. The selected range width will determine how far above.`
-                          : `Your ${tokenY} will be placed in bins below the current price. The selected range width will determine how far below.`
-                        }
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Cost Summary */}
-              <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
-                <div className="text-sm text-sub-text mb-3 font-medium">Position Cost Breakdown</div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Position Rent (refundable):</span>
-                    <span className="text-green-400 font-medium">0.057 SOL</span>
-                  </div>
-                  {selectedRangeType !== 'custom' && rangeRecommendations && (
-                    <div className="flex justify-between">
-                      <span>BinArray Cost (using existing):</span>
-                      <span className="text-green-400 font-medium">
-                        {(rangeRecommendations[selectedRangeType].estimatedCost - 0.057).toFixed(3)} SOL
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
-                    <span>Total Estimated Cost:</span>
-                    <span className={
-                      selectedRangeType !== 'custom' && rangeRecommendations 
-                        ? rangeRecommendations[selectedRangeType].estimatedCost <= 0.1 ? 'text-green-400' : 'text-yellow-400'
-                        : 'text-yellow-400'
-                    }>
-                      {selectedRangeType !== 'custom' && rangeRecommendations 
-                        ? `${rangeRecommendations[selectedRangeType].estimatedCost.toFixed(3)} SOL`
-                        : '~0.057-0.25 SOL'
-                      }
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Strategy Selection */}
-          <div className="space-y-3">
-            <label className="text-sm text-sub-text block font-medium">Strategy</label>
-            <select
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value)}
-              className="w-full bg-[#0f0f0f] border border-border rounded-lg p-4 text-white"
-            >
-              <option value="Spot">Spot (Balanced Distribution)</option>
-              <option value="BidAsk">BidAsk (Edge Concentration)</option>
-              <option value="Curve">Curve (Center Concentration)</option>
-            </select>
           </div>
-          
-          {/* Pool Information */}
+
+          {/* Position Details Explanation */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
             <div className="flex items-start gap-3">
               <Info className="h-5 w-5 flex-shrink-0 mt-0.5 text-primary" />
               <div className="text-sm text-sub-text space-y-2">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-xs text-sub-text">Current Price</div>
-                    <div className="text-white font-medium">${pool?.currentPrice}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-sub-text">Expected APY</div>
-                    <div className="text-white font-medium">{pool?.apy}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-sub-text">Bin Step</div>
-                    <div className="text-white font-medium">{pool?.binStep}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-sub-text">Pool Address</div>
-                    <div className="text-white font-medium font-mono">{pool?.address.slice(0, 8)}...</div>
-                  </div>
+                <div>
+                  <div className="font-medium text-white mb-2">One-Sided Position Details:</div>
+                  <div>• Only {tokenX} required - no SOL for liquidity needed</div>
+                  <div>• Position placed above current price ({currentBinId ? `bins ${currentBinId + 1}-${currentBinId + 10}` : 'loading...'})</div>
+                  <div>• Earns fees when price rises into your range</div>
+                  <div>• Conservative approach - lower capital requirement</div>
+                  <div>• Perfect for {tokenX} holders who want upside exposure</div>
+                  <div>• SOL only needed for account creation, not liquidity</div>
                 </div>
-                {selectedRangeType !== 'custom' && rangeRecommendations && !isOneSided && (
-                  <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded">
-                    <div className="text-green-400 text-xs font-medium">
-                      💡 Using optimized range strategy - this saves on creation costs by utilizing existing price bins!
-                    </div>
-                  </div>
-                )}
-                {isOneSided && (
-                  <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded">
-                    <div className="text-blue-400 text-xs font-medium">
-                      🎯 One-sided position: You're only providing {selectedToken === 'X' ? tokenX : tokenY}. Your position will be {selectedToken === 'X' ? 'above' : 'below'} the current price.
-                    </div>
-                  </div>
-                )}
               </div>
+            </div>
+          </div>
+
+          {/* Cost Breakdown */}
+          <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+            <div className="text-sm text-sub-text mb-3 font-medium">💰 Cost Breakdown</div>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span>Position Rent (refundable):</span>
+                <span className="text-green-400 font-medium">0.057 SOL</span>
+              </div>
+              <div className="flex justify-between">
+                <span>BinArray Creation (if needed):</span>
+                <span className="text-yellow-400 font-medium">~0.075 SOL</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Transaction Fees:</span>
+                <span className="text-blue-400 font-medium">~0.015 SOL</span>
+              </div>
+              <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
+                <span>Total Estimated:</span>
+                <span className="text-primary">~0.147 SOL</span>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-sub-text">
+              💡 BinArray cost is one-time per price range. Future positions in same range cost much less.
             </div>
           </div>
         </div>
@@ -1122,11 +425,11 @@ Cost: ${actualCost.toFixed(3)} SOL`);
           <Button 
             onClick={handleAddLiquidity} 
             disabled={
-              !amount || 
-              parseFloat(amount) <= 0 || 
+              !btcAmount || 
+              parseFloat(btcAmount) <= 0 || 
               isLoading || 
               isCheckingBalance ||
-              (balanceInfo ? (!balanceInfo.hasEnoughSol || !balanceInfo.hasEnoughToken) : false)
+              (balanceInfo ? !balanceInfo.hasEnoughSol : false)
             }
             className="bg-primary hover:bg-primary/80 w-full sm:w-auto"
           >
@@ -1136,7 +439,7 @@ Cost: ${actualCost.toFixed(3)} SOL`);
                 Creating Position...
               </>
             ) : (
-              isOneSided ? `Add ${selectedToken === 'X' ? tokenX : tokenY} Liquidity` : 'Add Liquidity'
+              `Add One-Sided Liquidity`
             )}
           </Button>
         </DialogFooter>
