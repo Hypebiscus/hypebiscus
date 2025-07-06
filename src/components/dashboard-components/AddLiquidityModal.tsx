@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Info, AlertTriangle, CheckCircle } from "lucide-react";
+import { Loader2, Info, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
@@ -53,6 +53,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
   const [currentBinId, setCurrentBinId] = useState<number | null>(null);
+  const [showPositionDetails, setShowPositionDetails] = useState(false);
+  const [showCostBreakdown, setShowCostBreakdown] = useState(false);
 
   // Get token names from pool
   const getTokenNames = () => {
@@ -339,7 +341,8 @@ Please add more SOL to your wallet and try again.`);
               {rangeOptions.map((option) => (
                 <div 
                   key={option.id}
-                  className="p-4 border border-primary bg-primary/10 rounded-lg"
+                  className="p-4 border border-primary bg-primary/10 rounded-lg cursor-pointer"
+                  onClick={() => setShowPositionDetails(!showPositionDetails)}
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
@@ -361,67 +364,86 @@ Please add more SOL to your wallet and try again.`);
                         <span>Strategy: Conservative</span>
                       </div>
                     </div>
-                    <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+                      {showPositionDetails ? (
+                        <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Position Details Explanation */}
-          <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <Info className="h-5 w-5 flex-shrink-0 mt-0.5 text-primary" />
-              <div className="text-sm text-sub-text space-y-2">
-                <div>
-                  <div className="font-medium text-white mb-2">One-Sided Position Details:</div>
-                  <div>• Only {tokenX} required - no SOL for liquidity needed</div>
-                  <div>• Position placed above current price ({currentBinId ? `bins ${currentBinId + 1}-${currentBinId + 10}` : 'loading...'})</div>
-                  <div>• Earns fees when price rises into your range</div>
-                  <div>• Conservative approach - lower capital requirement</div>
-                  <div>• Perfect for {tokenX} holders who want upside exposure</div>
-                  <div>• SOL only needed for account creation, not liquidity</div>
+          {/* Position Details Explanation - Collapsible */}
+          {showPositionDetails && (
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4 animate-in slide-in-from-top-2 duration-200">
+              <div className="flex items-start gap-3">
+                <Info className="h-5 w-5 flex-shrink-0 mt-0.5 text-primary" />
+                <div className="text-sm text-sub-text space-y-2">
+                  <div>
+                    <div className="font-medium text-white mb-2">One-Sided Position Details:</div>
+                    <div>• Only {tokenX} required - no SOL for liquidity needed</div>
+                    <div>• Position placed above current price ({currentBinId ? `bins ${currentBinId + 1}-${currentBinId + 10}` : 'loading...'})</div>
+                    <div>• Earns fees when price rises into your range</div>
+                    <div>• Conservative approach - lower capital requirement</div>
+                    <div>• Perfect for {tokenX} holders who want upside exposure</div>
+                    <div>• SOL only needed for account creation, not liquidity</div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Cost Breakdown */}
-          <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
-            <div className="text-sm text-sub-text mb-3 font-medium">💰 Cost Breakdown</div>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span>Position Rent (refundable):</span>
-                <span className="text-green-400 font-medium">0.057 SOL</span>
+          {/* Cost Breakdown - Collapsible */}
+          <div className="bg-[#0f0f0f] border border-border rounded-lg">
+            <div 
+              className="p-4 cursor-pointer flex items-center justify-between"
+              onClick={() => setShowCostBreakdown(!showCostBreakdown)}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown</span>
+                <span className="text-primary font-medium">~0.147 SOL</span>
               </div>
-              <div className="flex justify-between">
-                <span>BinArray Creation (if needed):</span>
-                <span className="text-yellow-400 font-medium">~0.075 SOL</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Transaction Fees:</span>
-                <span className="text-blue-400 font-medium">~0.015 SOL</span>
-              </div>
-              <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
-                <span>Total Estimated:</span>
-                <span className="text-primary">~0.147 SOL</span>
-              </div>
+              {showCostBreakdown ? (
+                <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
+              )}
             </div>
-            <div className="mt-3 text-xs text-sub-text">
-              💡 BinArray cost is one-time per price range. Future positions in same range cost much less.
-            </div>
+            
+            {showCostBreakdown && (
+              <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="space-y-2 text-sm border-t border-border pt-4">
+                  <div className="flex justify-between">
+                    <span>Position Rent (refundable):</span>
+                    <span className="text-green-400 font-medium">0.057 SOL</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>BinArray Creation (if needed):</span>
+                    <span className="text-yellow-400 font-medium">~0.075 SOL</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Transaction Fees:</span>
+                    <span className="text-blue-400 font-medium">~0.015 SOL</span>
+                  </div>
+                  <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
+                    <span>Total Estimated:</span>
+                    <span className="text-primary">~0.147 SOL</span>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-sub-text">
+                  💡 BinArray cost is one-time per price range. Future positions in same range cost much less.
+                </div>
+              </div>
+            )}
           </div>
         </div>
         
-        <DialogFooter className="mt-8 flex flex-col sm:flex-row gap-3">
-          <Button 
-            variant="outline" 
-            onClick={onClose} 
-            disabled={isLoading}
-            className="w-full sm:w-auto"
-          >
-            Cancel
-          </Button>
+        <DialogFooter className="mt-8 flex flex-col gap-3 sm:flex-row">
           <Button 
             onClick={handleAddLiquidity} 
             disabled={
@@ -431,7 +453,7 @@ Please add more SOL to your wallet and try again.`);
               isCheckingBalance ||
               (balanceInfo ? !balanceInfo.hasEnoughSol : false)
             }
-            className="bg-primary hover:bg-primary/80 w-full sm:w-auto"
+            className="bg-primary hover:bg-primary/80 w-full sm:w-auto order-1 sm:order-2"
           >
             {isLoading ? (
               <>
@@ -441,6 +463,14 @@ Please add more SOL to your wallet and try again.`);
             ) : (
               `Add One-Sided Liquidity`
             )}
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={onClose} 
+            disabled={isLoading}
+            className="w-full sm:w-auto order-2 sm:order-1"
+          >
+            Cancel
           </Button>
         </DialogFooter>
       </DialogContent>
