@@ -1,5 +1,5 @@
-// Enhanced AddLiquidityModal.tsx - Simplified for wrapped BTC only
-// Conservative approach with one-sided positions only
+// Enhanced AddLiquidityModal.tsx - Uses user's portfolio style and pool's actual bin step
+// Dynamic strategy based on user's previous selection and pool characteristics
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -17,6 +17,7 @@ interface AddLiquidityModalProps {
   isOpen: boolean;
   onClose: () => void;
   pool: FormattedPool | null;
+  userPortfolioStyle?: string | null; // Accept both string and null from ChatBox
 }
 
 interface BalanceInfo {
@@ -27,34 +28,43 @@ interface BalanceInfo {
   shortfall?: number;
 }
 
-interface SimplifiedRangeOption {
-  id: 'oneSided';
+interface StrategyOption {
+  id: string;
   label: string;
   description: string;
   icon: string;
+  binStep: number; // Use pool's actual bin step
   estimatedCost: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  portfolioStyle: string; // Use user's actual portfolio style
   isDefault?: boolean;
+  strategy: 'oneSided' | 'balanced' | 'ranged';
 }
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
   isOpen, 
   onClose,
-  pool 
+  pool,
+  userPortfolioStyle = 'conservative' // Handle null by defaulting to conservative
 }) => {
+  // Convert null to conservative for internal use
+  const actualPortfolioStyle = userPortfolioStyle || 'conservative';
   const { publicKey, sendTransaction } = useWallet();
   const { service: dlmmService } = useMeteoraDlmmService();
   const { service: positionService } = useMeteoraPositionService();
   
-  // Simplified state - only wrapped BTC amount needed
+  // State management
   const [btcAmount, setBtcAmount] = useState('');
-  const [selectedOption, setSelectedOption] = useState<'oneSided'>('oneSided');
+  const [selectedStrategy, setSelectedStrategy] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
   const [currentBinId, setCurrentBinId] = useState<number | null>(null);
-  const [showPositionDetails, setShowPositionDetails] = useState(false);
+  const [showStrategyDetails, setShowStrategyDetails] = useState(false);
   const [showCostBreakdown, setShowCostBreakdown] = useState(false);
+  const [showAccountBalance, setShowAccountBalance] = useState(false);
+  const [showPoolInfo, setShowPoolInfo] = useState(false);
 
   // Get token names from pool
   const getTokenNames = () => {
@@ -68,17 +78,69 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
   const { tokenX, tokenY } = getTokenNames();
 
-  // Simplified range options - only one-sided BTC positions
-  const rangeOptions: SimplifiedRangeOption[] = [
-    {
-      id: 'oneSided',
-      label: `⚡ One-Sided Position`, 
-      description: `Single-token position • Only ${tokenX} needed • Earns when price rises • Conservative approach`,
-      icon: '⚡',
-      estimatedCost: 0.057, // Base position rent only
-      isDefault: true
+  // Get pool's actual bin step
+  const poolBinStep = useMemo(() => {
+    if (!pool || !pool.binStep || pool.binStep === 'N/A') return 10; // fallback
+    return parseInt(pool.binStep);
+  }, [pool]);
+
+  // Determine risk level based on bin step
+  const getRiskLevelFromBinStep = (binStep: number): 'low' | 'medium' | 'high' => {
+    if (binStep >= 50) return 'low';
+    if (binStep >= 10) return 'medium';
+    return 'high';
+  };
+
+  // Get portfolio style icon and description
+  const getPortfolioStyleInfo = (style: string) => {
+    switch (style.toLowerCase()) {
+      case 'conservative':
+        return { icon: '🛡️', label: 'Conservative', color: 'text-green-400' };
+      case 'moderate':
+        return { icon: '📊', label: 'Moderate', color: 'text-yellow-400' };
+      case 'aggressive':
+        return { icon: '🚀', label: 'Aggressive', color: 'text-red-400' };
+      default:
+        return { icon: '⚖️', label: 'Balanced', color: 'text-blue-400' };
     }
-  ];
+  };
+
+  // Dynamic strategy options based on user's portfolio style and pool's bin step
+  const strategyOptions: StrategyOption[] = useMemo(() => {
+    const riskLevel = getRiskLevelFromBinStep(poolBinStep);
+    const styleInfo = getPortfolioStyleInfo(actualPortfolioStyle);
+    
+    // Base cost estimation based on bin step
+    const baseCost = poolBinStep <= 5 ? 0.120 : 
+                    poolBinStep <= 15 ? 0.075 : 
+                    0.057;
+
+    // Only show the user's selected strategy - no confusing alternatives
+    return [
+      {
+        id: 'oneSided-primary',
+        label: `${styleInfo.icon} One-Sided`, 
+        description: `Perfect for your ${actualPortfolioStyle} investment approach with this pool's characteristics`,
+        icon: styleInfo.icon,
+        binStep: poolBinStep,
+        estimatedCost: baseCost,
+        riskLevel,
+        portfolioStyle: actualPortfolioStyle,
+        strategy: 'oneSided',
+        isDefault: true
+      }
+    ];
+  }, [actualPortfolioStyle, poolBinStep, tokenX]);
+
+  // Set default strategy on load
+  useEffect(() => {
+    if (strategyOptions.length > 0 && !selectedStrategy) {
+      setSelectedStrategy(strategyOptions[0].id);
+    }
+  }, [strategyOptions, selectedStrategy]);
+
+  // Get selected strategy details
+  const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
 
   // Get current active bin on modal open
   useEffect(() => {
@@ -87,15 +149,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen, pool]);
 
-  // Check balances when amount changes
+  // Check balances when amount or strategy changes
   useEffect(() => {
-    if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool) {
+    if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool && selectedStrategyOption) {
       checkUserBalances();
     } else {
       setBalanceInfo(null);
       setValidationError('');
     }
-  }, [btcAmount, publicKey, pool]);
+  }, [btcAmount, publicKey, pool, selectedStrategyOption]);
 
   const loadCurrentBin = async () => {
     if (!pool) return;
@@ -111,7 +173,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
 
   const checkUserBalances = async () => {
-    if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0) return;
+    if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0 || !selectedStrategyOption) return;
 
     setIsCheckingBalance(true);
     setValidationError('');
@@ -125,13 +187,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const solBalanceLamports = await connection.getBalance(publicKey);
       const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
       
-      const btcAmountValue = parseFloat(btcAmount);
+      // Calculate estimated SOL needed based on actual bin step
+      let estimatedSolNeeded = selectedStrategyOption.estimatedCost + 0.015; // Base cost + transaction fees
       
-      // Calculate estimated SOL needed for one-sided position only
-      let estimatedSolNeeded = 0.057 + 0.015; // Base position rent + transaction fees
+      // Add buffer for potential binArray creation based on actual bin step
+      // Smaller bin steps might need more binArrays
+      const binArrayBuffer = poolBinStep <= 5 ? 0.150 :   // High precision might need more bins
+                           poolBinStep <= 15 ? 0.075 :     // Standard case
+                           0.057;                           // Conservative, likely existing bins
       
-      // Add buffer for potential binArray creation (conservative estimate)
-      estimatedSolNeeded += 0.075; // One binArray creation cost
+      estimatedSolNeeded += binArrayBuffer;
       
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
       const shortfall = hasEnoughSol ? 0 : estimatedSolNeeded - solBalance;
@@ -169,7 +234,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
 
   const handleAddLiquidity = async () => {
-    if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId) return;
+    if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption) return;
 
     // Enhanced validation
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
@@ -194,14 +259,34 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       
       const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
       
-      // Create one-sided wrapped BTC position (above current price)
+      // Calculate bin range based on pool's actual bin step and user's strategy
+      let minBinId: number;
+      let maxBinId: number;
+      
+      // Adjust range based on actual bin step - simpler since we only have one strategy
+      const rangeWidth = Math.max(3, Math.floor(15 / Math.sqrt(poolBinStep))); 
+      
+      // For one-sided positions, place above current price
+      minBinId = currentBinId + 1;
+      maxBinId = currentBinId + rangeWidth;
+      
+      console.log(`Creating ${userPortfolioStyle} one-sided position with pool's bin step:`, {
+        poolBinStep,
+        userStyle: userPortfolioStyle,
+        range: `${minBinId} to ${maxBinId}`,
+        rangeWidth,
+        amount: btcAmount,
+        token: tokenX
+      });
+      
+      // Create one-sided position using pool's actual parameters
       const result = await positionService.createOneSidedPosition({
         poolAddress: pool.address,
         userPublicKey: publicKey,
         totalXAmount: bnAmount, // Wrapped BTC amount
         totalYAmount: new BN(0), // No SOL needed for liquidity
-        minBinId: currentBinId + 1, // Start above current price
-        maxBinId: currentBinId + 10, // 10 bins above current price
+        minBinId,
+        maxBinId,
         strategyType: StrategyType.Spot,
         useAutoFill: false
       }, true); // true = providing token X (wrapped BTC)
@@ -220,16 +305,22 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         console.log('Transaction signature:', signature);
       }
       
-      const actualCost = result.estimatedCost?.total || 0.057;
-      alert(`${tokenX}-only position created successfully! 
+      const actualCost = result.estimatedCost?.total || selectedStrategyOption.estimatedCost;
+      const riskDescription = selectedStrategyOption.riskLevel === 'high' ? 'high precision, active monitoring recommended' :
+                             selectedStrategyOption.riskLevel === 'medium' ? 'balanced approach, moderate monitoring' :
+                             'stable and conservative, minimal monitoring needed';
+      
+              alert(`${actualPortfolioStyle.toUpperCase()} ${tokenX}-only position created successfully! 
 
 Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}...
+Your Strategy: ${selectedStrategyOption.label}
+Pool's Bin Step: ${poolBinStep} (${riskDescription})
 Amount: ${btcAmount} ${tokenX}
-Range: Bins ${currentBinId + 1} to ${currentBinId + 10} (above current price)
+Range: Bins ${minBinId} to ${maxBinId} (above current price)
 Cost: ${actualCost.toFixed(3)} SOL
 
 Your ${tokenX} will earn fees when the price rises into your range.
-This is a conservative, single-token approach perfect for upside exposure.`);
+This position matches your ${actualPortfolioStyle} investment profile perfectly!`);
       
       onClose();
       setBtcAmount('');
@@ -238,29 +329,56 @@ This is a conservative, single-token approach perfect for upside exposure.`);
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
-      // Enhanced error handling for common issues
+      // Enhanced error handling with bin step context
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        alert(`Insufficient SOL balance detected. 
+        alert(`Insufficient SOL balance for your ${actualPortfolioStyle} strategy. 
+
+This pool uses bin step ${poolBinStep}:
+${poolBinStep <= 5 ? '• Very high precision (0.05% per bin) - may require more binArray creation' : ''}
+${poolBinStep <= 15 && poolBinStep > 5 ? '• Standard precision - balanced cost and efficiency' : ''}
+${poolBinStep >= 50 ? '• Conservative precision - usually uses existing bins, lower cost' : ''}
 
 What you need SOL for:
-• Position rent: 0.057 SOL (refundable when you close position)
-• BinArray creation: ~0.075 SOL (one-time cost for new price ranges)  
+• Position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable)
+• BinArray creation: varies by bin step complexity
 • Transaction fees: ~0.015 SOL
-
-Total needed: ~0.147 SOL minimum
-
-This SOL is NOT used for liquidity - it's just for account creation and fees.
-Your wrapped Bitcoin tokens (${tokenX}) provide the actual liquidity.
 
 Please add more SOL to your wallet and try again.`);
       } else if (errorMessage.includes('Transaction simulation failed')) {
-        alert('Transaction failed during simulation. This usually means insufficient funds or the selected price range requires expensive bin creation. Try again with more SOL.');
+        alert(`Transaction failed for bin step ${poolBinStep} pool. This could be due to:
+
+1. Insufficient funds for this precision level
+2. The selected price range requires expensive bin creation
+3. Network congestion
+
+Bin step ${poolBinStep} characteristics:
+${poolBinStep <= 5 ? '• Very high precision - requires more SOL for bin creation' : ''}
+${poolBinStep <= 15 && poolBinStep > 5 ? '• Standard precision - moderate SOL requirements' : ''}
+${poolBinStep >= 50 ? '• Conservative precision - minimal SOL requirements' : ''}
+
+Try again with more SOL.`);
       } else {
-        alert(`Error adding liquidity: ${errorMessage}`);
+        alert(`Error creating ${actualPortfolioStyle} position: ${errorMessage}`);
       }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Get risk color for UI
+  const getRiskColor = (risk: 'low' | 'medium' | 'high') => {
+    switch (risk) {
+      case 'low': return 'text-green-400 border-green-500/30 bg-green-500/10';
+      case 'medium': return 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10';
+      case 'high': return 'text-red-400 border-red-500/30 bg-red-500/10';
+    }
+  };
+
+  // Get bin step description
+  const getBinStepDescription = (binStep: number) => {
+    if (binStep <= 5) return 'Very high precision (0.05% increments) - maximum fee capture but higher volatility';
+    if (binStep <= 15) return 'Standard precision (0.1-1.5% increments) - good balance of fees and stability';
+    return 'Conservative precision (5%+ increments) - very stable, lower but consistent returns';
   };
   
   return (
@@ -269,33 +387,101 @@ Please add more SOL to your wallet and try again.`);
         <DialogHeader className="space-y-3">
           <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity</DialogTitle>
           <DialogDescription className="text-sm text-sub-text">
-            Conservative wrapped Bitcoin liquidity - Single-token position above current price
+            Using your {actualPortfolioStyle} strategy with this pool's bin step {poolBinStep}
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-6 mt-6">
-          {/* Balance Display */}
+          {/* Pool Information - Collapsible */}
+          <div className="bg-[#0f0f0f] border border-border rounded-lg">
+            <div 
+              className="p-4 cursor-pointer flex items-center justify-between"
+              onClick={() => setShowPoolInfo(!showPoolInfo)}
+            >
+              <div className="flex items-center gap-2">
+                <Info className="h-5 w-5 flex-shrink-0 text-primary" />
+                <span className="text-sm text-sub-text font-medium">Pool Information</span>
+                <span className="text-primary font-medium text-xs">
+                  {pool?.name} • BS-{poolBinStep}
+                </span>
+              </div>
+              {showPoolInfo ? (
+                <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
+              )}
+            </div>
+            
+            {showPoolInfo && (
+              <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="space-y-2 border-t border-border pt-4">
+                  <div className="flex justify-between items-center text-sm">
+                    <span>Pool:</span>
+                    <span className="text-white font-medium">{pool?.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span>Bin Step:</span>
+                    <span className="text-primary font-medium">{poolBinStep}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span>Your Style:</span>
+                    <span className={`font-medium ${getPortfolioStyleInfo(actualPortfolioStyle).color}`}>
+                      {getPortfolioStyleInfo(actualPortfolioStyle).icon} {getPortfolioStyleInfo(actualPortfolioStyle).label}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span>Risk Level:</span>
+                    <span className={`px-2 py-1 rounded text-xs border ${getRiskColor(getRiskLevelFromBinStep(poolBinStep))}`}>
+                      {getRiskLevelFromBinStep(poolBinStep).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Balance Display - Collapsible */}
           {balanceInfo && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
-              <div className="text-sm text-sub-text mb-3 font-medium">Account Balance</div>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-sm">
-                  <span>SOL Balance:</span>
-                  <span className={balanceInfo.hasEnoughSol ? 'text-green-400 font-medium' : 'text-red-400 font-medium'}>
-                    {balanceInfo.solBalance.toFixed(4)} SOL
+            <div className="bg-[#0f0f0f] border border-border rounded-lg">
+              <div 
+                className="p-4 cursor-pointer flex items-center justify-between"
+                onClick={() => setShowAccountBalance(!showAccountBalance)}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-sub-text font-medium">💰 Account Balance</span>
+                  <span className={`font-medium text-xs ${balanceInfo.hasEnoughSol ? 'text-green-400' : 'text-red-400'}`}>
+                    {balanceInfo.hasEnoughSol ? '✓ Sufficient' : '⚠️ Insufficient'}
                   </span>
                 </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span>SOL Needed:</span>
-                  <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
-                </div>
-                {balanceInfo.shortfall && balanceInfo.shortfall > 0 && (
-                  <div className="flex justify-between items-center text-sm">
-                    <span>Shortfall:</span>
-                    <span className="text-red-400 font-medium">-{balanceInfo.shortfall.toFixed(4)} SOL</span>
-                  </div>
+                {showAccountBalance ? (
+                  <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
                 )}
               </div>
+              
+              {showAccountBalance && (
+                <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                  <div className="space-y-2 border-t border-border pt-4">
+                    <div className="flex justify-between items-center text-sm">
+                      <span>SOL Balance:</span>
+                      <span className={balanceInfo.hasEnoughSol ? 'text-green-400 font-medium' : 'text-red-400 font-medium'}>
+                        {balanceInfo.solBalance.toFixed(4)} SOL
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span>SOL Needed:</span>
+                      <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
+                    </div>
+                    {balanceInfo.shortfall && balanceInfo.shortfall > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span>Shortfall:</span>
+                        <span className="text-red-400 font-medium">-{balanceInfo.shortfall.toFixed(4)} SOL</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -331,46 +517,40 @@ Please add more SOL to your wallet and try again.`);
             </div>
           </div>
 
-          {/* Simplified Position Type Display */}
+          {/* Strategy Selection - Now shows only your chosen strategy */}
           <div className="space-y-4">
             <label className="text-sm text-sub-text block font-medium">
-              💡 Conservative Position Strategy
+              💡 Your Position Strategy
             </label>
             
             <div className="grid gap-3">
-              {rangeOptions.map((option) => (
+              {strategyOptions.map((option) => (
                 <div 
                   key={option.id}
-                  className="p-4 border border-primary bg-primary/10 rounded-lg cursor-pointer"
-                  onClick={() => setShowPositionDetails(!showPositionDetails)}
+                  className="p-4 border border-primary bg-primary/10 rounded-lg"
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-lg">{option.icon}</span>
-                        <div className="font-medium text-primary text-sm">
+                        <div className="font-medium text-white text-sm">
                           {option.label}
                         </div>
-                        <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30">
-                          SELECTED
+                        <div className="px-2 py-1 rounded-full text-xs bg-primary/20 text-primary border border-primary/30">
+                          YOUR STYLE
                         </div>
                       </div>
                       <div className="text-xs text-sub-text mb-2">
                         {option.description}
                       </div>
                       <div className="flex items-center gap-4 text-xs">
-                        <span>Base Cost: {option.estimatedCost.toFixed(3)} SOL</span>
-                        <span>Risk: Low</span>
-                        <span>Strategy: Conservative</span>
+                        <span>Bin Step: {option.binStep}</span>
+                        <span>Cost: ~{option.estimatedCost.toFixed(3)} SOL</span>
+                        <span>Strategy: One-sided {tokenX}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
-                      {showPositionDetails ? (
-                        <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
-                      )}
                     </div>
                   </div>
                 </div>
@@ -378,27 +558,45 @@ Please add more SOL to your wallet and try again.`);
             </div>
           </div>
 
-          {/* Position Details Explanation - Collapsible */}
-          {showPositionDetails && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4 animate-in slide-in-from-top-2 duration-200">
-              <div className="flex items-start gap-3">
-                <Info className="h-5 w-5 flex-shrink-0 mt-0.5 text-primary" />
-                <div className="text-sm text-sub-text space-y-2">
-                  <div>
-                    <div className="font-medium text-white mb-2">One-Sided Position Details:</div>
-                    <div>• Only {tokenX} required - no SOL for liquidity needed</div>
-                    <div>• Position placed above current price ({currentBinId ? `bins ${currentBinId + 1}-${currentBinId + 10}` : 'loading...'})</div>
-                    <div>• Earns fees when price rises into your range</div>
-                    <div>• Conservative approach - lower capital requirement</div>
-                    <div>• Perfect for {tokenX} holders who want upside exposure</div>
-                    <div>• SOL only needed for account creation, not liquidity</div>
+          {/* Strategy Details Explanation */}
+          {selectedStrategyOption && (
+            <div className="bg-[#0f0f0f] border border-border rounded-lg">
+              <div 
+                className="p-4 cursor-pointer flex items-center justify-between"
+                onClick={() => setShowStrategyDetails(!showStrategyDetails)}
+              >
+                <div className="flex items-center gap-2">
+                  <Info className="h-5 w-5 flex-shrink-0 text-primary" />
+                  <span className="text-sm text-sub-text font-medium">
+                    Strategy Details (Bin Step {poolBinStep})
+                  </span>
+                </div>
+                {showStrategyDetails ? (
+                  <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
+                )}
+              </div>
+              
+              {showStrategyDetails && (
+                <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                  <div className="text-sm text-sub-text space-y-2 border-t border-border pt-4">
+                    <div>
+                      <div className="font-medium text-white mb-2">Your Position Details:</div>
+                      <div>• Bin Step {poolBinStep}: {getBinStepDescription(poolBinStep)}</div>
+                      <div>• Portfolio Style: {actualPortfolioStyle.toUpperCase()} - matches your risk preference</div>
+                      <div>• Position Type: One-sided {tokenX} only</div>
+                      <div>• Placement: Above current price (earns when price rises)</div>
+                      <div>• Range: Dynamically calculated based on bin step efficiency</div>
+                      <div>• Perfect Match: This pool's characteristics align with your {actualPortfolioStyle} strategy</div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
-          {/* Cost Breakdown - Collapsible */}
+          {/* Cost Breakdown */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg">
             <div 
               className="p-4 cursor-pointer flex items-center justify-between"
@@ -406,7 +604,9 @@ Please add more SOL to your wallet and try again.`);
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown</span>
-                <span className="text-primary font-medium">~0.147 SOL</span>
+                <span className="text-primary font-medium">
+                  ~{selectedStrategyOption ? (selectedStrategyOption.estimatedCost + (poolBinStep <= 5 ? 0.150 : poolBinStep <= 15 ? 0.075 : 0.057) + 0.015).toFixed(3) : '0.147'} SOL
+                </span>
               </div>
               {showCostBreakdown ? (
                 <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
@@ -415,16 +615,18 @@ Please add more SOL to your wallet and try again.`);
               )}
             </div>
             
-            {showCostBreakdown && (
+            {showCostBreakdown && selectedStrategyOption && (
               <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
                 <div className="space-y-2 text-sm border-t border-border pt-4">
                   <div className="flex justify-between">
                     <span>Position Rent (refundable):</span>
-                    <span className="text-green-400 font-medium">0.057 SOL</span>
+                    <span className="text-green-400 font-medium">{selectedStrategyOption.estimatedCost.toFixed(3)} SOL</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>BinArray Creation (if needed):</span>
-                    <span className="text-yellow-400 font-medium">~0.075 SOL</span>
+                    <span>BinArray Creation (bin step {poolBinStep}):</span>
+                    <span className="text-yellow-400 font-medium">
+                      ~{(poolBinStep <= 5 ? 0.150 : poolBinStep <= 15 ? 0.075 : 0.057).toFixed(3)} SOL
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Transaction Fees:</span>
@@ -432,11 +634,15 @@ Please add more SOL to your wallet and try again.`);
                   </div>
                   <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
                     <span>Total Estimated:</span>
-                    <span className="text-primary">~0.147 SOL</span>
+                    <span className="text-primary">
+                      ~{(selectedStrategyOption.estimatedCost + (poolBinStep <= 5 ? 0.150 : poolBinStep <= 15 ? 0.075 : 0.057) + 0.015).toFixed(3)} SOL
+                    </span>
                   </div>
                 </div>
                 <div className="mt-3 text-xs text-sub-text">
-                  💡 BinArray cost is one-time per price range. Future positions in same range cost much less.
+                  💡 {poolBinStep <= 5 ? 'High precision bin step may require creating new price bins.' : 
+                      poolBinStep >= 50 ? 'Conservative bin step often uses existing bins, saving costs.' :
+                      'This bin step provides a good balance of cost and precision.'}
                 </div>
               </div>
             )}
@@ -461,7 +667,7 @@ Please add more SOL to your wallet and try again.`);
                 Creating Position...
               </>
             ) : (
-              `Add One-Sided Liquidity`
+              `Create ${actualPortfolioStyle} Position`
             )}
           </Button>
           <Button 
