@@ -1,4 +1,4 @@
-// Enhanced AddLiquidityModal.tsx - Uses user's portfolio style and pool's actual bin step
+// Enhanced AddLiquidityModal.tsx - Removed extra logo in position strategy
 // Dynamic strategy based on user's previous selection and pool characteristics
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -32,7 +32,6 @@ interface StrategyOption {
   id: string;
   label: string;
   description: string;
-  icon: string;
   binStep: number; // Use pool's actual bin step
   estimatedCost: number;
   riskLevel: 'low' | 'medium' | 'high';
@@ -119,9 +118,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     return [
       {
         id: 'oneSided-primary',
-        label: `${styleInfo.icon} One-Sided`, 
+        label: `${styleInfo.label} One-Sided`, // Removed icon from label
         description: `Perfect for your ${actualPortfolioStyle} investment approach with this pool's characteristics`,
-        icon: styleInfo.icon,
         binStep: poolBinStep,
         estimatedCost: baseCost,
         riskLevel,
@@ -532,7 +530,6 @@ Try again with more SOL.`);
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">{option.icon}</span>
                         <div className="font-medium text-white text-sm">
                           {option.label}
                         </div>
