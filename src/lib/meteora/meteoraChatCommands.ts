@@ -159,7 +159,7 @@ export async function parseDlmmCommand(params: CommandParams): Promise<CommandRe
             useAutoFill: true
           }
         };
-      } catch (error) {
+      } catch (_error) {
         return {
           type: CommandType.ADD_LIQUIDITY,
           success: true,
@@ -349,7 +349,7 @@ async function handleGetPoolsCommand(service: MeteoraDlmmService): Promise<Comma
           tokenY: pool.tokenY,
           activeBinId: activeBin.binId
         });
-      } catch (error) {
+      } catch (_error) {
         // Fallback to basic info if active bin fetch fails
         poolsInfo.push({
           name: pool.name,
@@ -412,7 +412,7 @@ async function handleGetPositionCommand(
             poolName: pool.name
           }));
           allPositions.push(...poolPositions);
-        } catch (err) {
+        } catch (_error) {
           // Skip pools that fail to fetch
           continue;
         }

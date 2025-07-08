@@ -5,10 +5,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, DollarSign, X, Percent } from "lucide-react";
-import { useMeteoraPositionService, RemoveLiquidityParams } from "@/lib/meteora/meteoraPositionService";
+import { useMeteoraPositionService} from "@/lib/meteora/meteoraPositionService";
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useWallet } from '@solana/wallet-adapter-react';
-import { BN } from 'bn.js';
 
 const DlmmPositions = () => {
   const { service: dlmmService } = useMeteoraDlmmService();

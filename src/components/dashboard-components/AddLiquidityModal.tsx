@@ -1,7 +1,7 @@
-// Enhanced AddLiquidityModal.tsx - Removed extra logo in position strategy
+// Enhanced AddLiquidityModal.tsx - Corrected all errors
 // Dynamic strategy based on user's previous selection and pool characteristics
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Info, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
@@ -75,7 +75,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     };
   };
 
-  const { tokenX, tokenY } = getTokenNames();
+  const { tokenX } = getTokenNames();
 
   // Get pool's actual bin step
   const poolBinStep = useMemo(() => {
@@ -128,7 +128,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         isDefault: true
       }
     ];
-  }, [actualPortfolioStyle, poolBinStep, tokenX]);
+  }, [actualPortfolioStyle, poolBinStep]);
 
   // Set default strategy on load
   useEffect(() => {
@@ -141,23 +141,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
 
   // Get current active bin on modal open
-  useEffect(() => {
-    if (isOpen && pool) {
-      loadCurrentBin();
-    }
-  }, [isOpen, pool]);
-
-  // Check balances when amount or strategy changes
-  useEffect(() => {
-    if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool && selectedStrategyOption) {
-      checkUserBalances();
-    } else {
-      setBalanceInfo(null);
-      setValidationError('');
-    }
-  }, [btcAmount, publicKey, pool, selectedStrategyOption]);
-
-  const loadCurrentBin = async () => {
+  const loadCurrentBin = useCallback(async () => {
     if (!pool) return;
     
     try {
@@ -168,9 +152,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     } catch (error) {
       console.error('Error loading current bin:', error);
     }
-  };
+  }, [dlmmService, pool]);
 
-  const checkUserBalances = async () => {
+  useEffect(() => {
+    if (isOpen && pool) {
+      loadCurrentBin();
+    }
+  }, [isOpen, pool, loadCurrentBin]);
+
+  // Check balances when amount or strategy changes
+  const checkUserBalances = useCallback(async () => {
     if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0 || !selectedStrategyOption) return;
 
     setIsCheckingBalance(true);
@@ -222,7 +213,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     } finally {
       setIsCheckingBalance(false);
     }
-  };
+  }, [publicKey, pool, btcAmount, selectedStrategyOption, poolBinStep]);
+
+  useEffect(() => {
+    if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool && selectedStrategyOption) {
+      checkUserBalances();
+    } else {
+      setBalanceInfo(null);
+      setValidationError('');
+    }
+  }, [btcAmount, publicKey, pool, selectedStrategyOption, checkUserBalances]);
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -258,15 +258,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
       
       // Calculate bin range based on pool's actual bin step and user's strategy
-      let minBinId: number;
-      let maxBinId: number;
-      
       // Adjust range based on actual bin step - simpler since we only have one strategy
       const rangeWidth = Math.max(3, Math.floor(15 / Math.sqrt(poolBinStep))); 
       
       // For one-sided positions, place above current price
-      minBinId = currentBinId + 1;
-      maxBinId = currentBinId + rangeWidth;
+      const minBinId = currentBinId + 1;
+      const maxBinId = currentBinId + rangeWidth;
       
       console.log(`Creating ${userPortfolioStyle} one-sided position with pool's bin step:`, {
         poolBinStep,
@@ -308,7 +305,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                              selectedStrategyOption.riskLevel === 'medium' ? 'balanced approach, moderate monitoring' :
                              'stable and conservative, minimal monitoring needed';
       
-              alert(`${actualPortfolioStyle.toUpperCase()} ${tokenX}-only position created successfully! 
+      alert(`${actualPortfolioStyle.toUpperCase()} ${tokenX}-only position created successfully! 
 
 Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}...
 Your Strategy: ${selectedStrategyOption.label}
@@ -385,7 +382,7 @@ Try again with more SOL.`);
         <DialogHeader className="space-y-3">
           <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity</DialogTitle>
           <DialogDescription className="text-sm text-sub-text">
-            Using your {actualPortfolioStyle} strategy with this pool's bin step {poolBinStep}
+            Using your {actualPortfolioStyle} strategy with this pool&apos;s bin step {poolBinStep}
           </DialogDescription>
         </DialogHeader>
         
@@ -585,7 +582,7 @@ Try again with more SOL.`);
                       <div>• Position Type: One-sided {tokenX} only</div>
                       <div>• Placement: Above current price (earns when price rises)</div>
                       <div>• Range: Dynamically calculated based on bin step efficiency</div>
-                      <div>• Perfect Match: This pool's characteristics align with your {actualPortfolioStyle} strategy</div>
+                      <div>• Perfect Match: This pool&apos;s characteristics align with your {actualPortfolioStyle} strategy</div>
                     </div>
                   </div>
                 </div>
