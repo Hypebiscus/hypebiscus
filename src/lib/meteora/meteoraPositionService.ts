@@ -7,6 +7,80 @@ import { useWallet } from '@solana/wallet-adapter-react';
 // Import types from DLMM service for consistency
 export type DlmmType = DLMM;
 
+// Define types to avoid any usage
+interface DLMMPool {
+  getActiveBin(): Promise<{
+    binId: number;
+    price: string;
+    xAmount: string;
+    yAmount: string;
+  }>;
+  getBin(binId: number): Promise<unknown>;
+  initializePositionAndAddLiquidityByStrategy(params: {
+    positionPubKey: PublicKey;
+    user: PublicKey;
+    totalXAmount: BN;
+    totalYAmount: BN;
+    strategy: {
+      maxBinId: number;
+      minBinId: number;
+      strategyType: StrategyType;
+    };
+  }): Promise<Transaction | Transaction[]>;
+  addLiquidityByStrategy(params: {
+    positionPubKey: PublicKey;
+    user: PublicKey;
+    totalXAmount: BN;
+    totalYAmount: BN;
+    strategy: {
+      maxBinId: number;
+      minBinId: number;
+      strategyType: StrategyType;
+    };
+  }): Promise<Transaction | Transaction[]>;
+  removeLiquidity(params: {
+    position: PublicKey;
+    user: PublicKey;
+    fromBinId: number;
+    toBinId: number;
+    liquiditiesBpsToRemove: BN[];
+    shouldClaimAndClose: boolean;
+  }): Promise<Transaction | Transaction[]>;
+  claimSwapFee(params: {
+    owner: PublicKey;
+    position: PublicKey;
+  }): Promise<Transaction>;
+  claimAllSwapFee(params: {
+    owner: PublicKey;
+    positions: PositionData[];
+  }): Promise<Transaction | Transaction[]>;
+  closePosition(params: {
+    owner: PublicKey;
+    position: PublicKey;
+  }): Promise<Transaction>;
+  getPosition(positionPubKey: PublicKey): Promise<unknown>;
+  getPositionsByUserAndLbPair(userPublicKey: PublicKey): Promise<{
+    userPositions: PositionData[];
+  }>;
+  lbPair: {
+    binStep: number;
+  };
+  [key: string]: unknown;
+}
+
+interface PositionData {
+  publicKey: PublicKey;
+  positionData: {
+    positionBinData: Array<{
+      binId: number;
+      xAmount: { toString(): string };
+      yAmount: { toString(): string };
+      liquidityAmount: { toString(): string };
+    }>;
+  };
+  [key: string]: unknown;
+}
+
 // Enhanced interface for position creation parameters
 export interface CreatePositionParams {
   poolAddress: string;
@@ -94,7 +168,7 @@ export class MeteoraPositionService {
   ): Promise<CostEstimation> {
     try {
       const pool = await this.initializePool(poolAddress);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       
       // Calculate which binArrays would be needed
       const binArraysNeeded = new Set<number>();
@@ -117,7 +191,8 @@ export class MeteoraPositionService {
           await typedPool.getBin(testBinId);
           existingBinArraysCount++;
           console.log(`BinArray ${binArrayIndex} exists (test bin ${testBinId})`);
-        } catch (error) {
+        } catch {
+          // Remove unused error parameter
           // BinArray doesn't exist, will need creation
           newBinArraysCount++;
           console.log(`BinArray ${binArrayIndex} needs creation (test bin failed)`);
@@ -146,8 +221,9 @@ export class MeteoraPositionService {
       
       return costEstimation;
       
-    } catch (error) {
-      console.error('Error checking binArray creation cost:', error);
+    } catch {
+      // Remove unused error parameter
+      console.error('Error checking binArray creation cost');
       
       // Conservative fallback estimate
       const binRangeWidth = maxBinId - minBinId;
@@ -243,7 +319,7 @@ export class MeteoraPositionService {
       // Step 3: Initialize pool and create position
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
 
       let totalYAmount = params.totalYAmount || new BN(0);
 
@@ -265,8 +341,8 @@ export class MeteoraPositionService {
             activeBin.binId,
             typedPool.lbPair.binStep,
             params.totalXAmount,
-            activeBin.xAmount,
-            activeBin.yAmount,
+            new BN(activeBin.xAmount),
+            new BN(activeBin.yAmount),
             params.minBinId,
             params.maxBinId,
             params.strategyType
@@ -351,7 +427,7 @@ export class MeteoraPositionService {
 
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       
       // For one-sided position, set either X or Y amount to 0
       const totalXAmount = useTokenX ? params.totalXAmount : new BN(0);
@@ -406,7 +482,7 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const positionPubKey = new PublicKey(params.positionPubkey);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       
       let finalTotalYAmount = totalYAmount;
 
@@ -419,8 +495,8 @@ export class MeteoraPositionService {
             activeBin.binId,
             typedPool.lbPair.binStep,
             totalXAmount,
-            activeBin.xAmount,
-            activeBin.yAmount,
+            new BN(activeBin.xAmount),
+            new BN(activeBin.yAmount),
             minBinId,
             maxBinId,
             strategyType
@@ -459,7 +535,7 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const positionPubKey = new PublicKey(params.positionPubkey);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       
       const removeLiquidityTx = await typedPool.removeLiquidity({
         position: positionPubKey,
@@ -488,12 +564,12 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const positionPubKey = new PublicKey(params.positionPubkey);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
 
       // Get user positions to find the specific position
       const { userPositions } = await typedPool.getPositionsByUserAndLbPair(params.userPublicKey);
       
-      const userPosition = userPositions.find((pos: any) => 
+      const userPosition = userPositions.find((pos: PositionData) => 
         pos.publicKey.equals(positionPubKey)
       );
 
@@ -502,7 +578,7 @@ export class MeteoraPositionService {
       }
 
       // Extract bin IDs from position data
-      const binIdsToRemove = userPosition.positionData.positionBinData.map((bin: any) => bin.binId);
+      const binIdsToRemove = userPosition.positionData.positionBinData.map((bin) => bin.binId);
       
       if (binIdsToRemove.length === 0) {
         throw new Error('No bins found in position');
@@ -538,7 +614,7 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const positionPubKey = new PublicKey(params.positionPubkey);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       
       const claimFeeTx = await typedPool.claimSwapFee({
         owner: params.userPublicKey,
@@ -561,7 +637,7 @@ export class MeteoraPositionService {
   ): Promise<Transaction[]> {
     try {
       const pool = await this.initializePool(poolAddress);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
 
       // Get all user positions
       const { userPositions } = await typedPool.getPositionsByUserAndLbPair(userPublicKey);
@@ -585,7 +661,7 @@ export class MeteoraPositionService {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const positionPubKey = new PublicKey(params.positionPubkey);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       
       const closePositionTx = await typedPool.closePosition({
         owner: params.userPublicKey,
@@ -605,11 +681,11 @@ export class MeteoraPositionService {
   async getPositionInfo(
     poolAddress: string,
     positionPubkey: string
-  ): Promise<any> {
+  ): Promise<unknown> {
     try {
       const pool = await this.initializePool(poolAddress);
       const positionPubKey = new PublicKey(positionPubkey);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
 
       const positionInfo = await typedPool.getPosition(positionPubKey);
       return positionInfo;
@@ -629,7 +705,7 @@ export class MeteoraPositionService {
   }> {
     try {
       const pool = await this.initializePool(poolAddress);
-      const typedPool = pool as any;
+      const typedPool = pool as unknown as DLMMPool;
       const activeBin = await typedPool.getActiveBin();
       
       // Define some common ranges to check

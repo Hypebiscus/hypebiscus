@@ -29,9 +29,10 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
       : WalletAdapterNetwork.Mainnet;
   
   // Get RPC URL from environment variable or fallback to public endpoint
+  // Include network dependency since clusterApiUrl actually uses it
   const endpoint = useMemo(() => 
     process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(network), 
-    [network]
+    [network] // Include network dependency
   );
   
   console.log(`Using Solana network: ${network}`);
@@ -45,7 +46,7 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
       // They're now automatically detected as Standard Wallets
       new TorusWalletAdapter()
     ],
-    [network]
+    [] // Remove network dependency since TorusWalletAdapter doesn't need it
   );
 
   return (

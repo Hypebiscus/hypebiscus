@@ -124,6 +124,37 @@ export interface ActiveBin {
   yAmount: string;
 }
 
+// Define types for DLMM pool and active bin to avoid any usage
+interface DLMMPool {
+  getActiveBin(): Promise<{
+    binId: number;
+    price: string;
+    xAmount: string;
+    yAmount: string;
+  }>;
+  getPositionsByUserAndLbPair(userPublicKey: PublicKey): Promise<{
+    userPositions: PositionType[];
+  }>;
+  getSwapQuote(params: {
+    inAmount: BN;
+    swapForY: boolean;
+    allowedSlippage: number;
+  }): Promise<{
+    amountOut?: BN;
+    minAmountOut?: BN;
+    fee?: BN;
+    priceImpact?: number;
+    binArraysPubkey?: PublicKey[];
+  }>;
+  swap(params: {
+    user: PublicKey;
+    inAmount: BN;
+    minAmountOut: BN;
+    swapForY: boolean;
+  }): Promise<Transaction>;
+  [key: string]: unknown;
+}
+
 /**
  * Enhanced Service to interact with Meteora DLMM with better error handling
  */
@@ -144,9 +175,8 @@ export class MeteoraDlmmService {
    */
   async validateUserBalance(
     userPublicKey: PublicKey,
-    requiredSolAmount: number,
-    tokenMint?: PublicKey,
-    requiredTokenAmount?: number
+    requiredSolAmount: number
+    // Remove unused parameters
   ): Promise<BalanceValidation> {
     try {
       // Check SOL balance
@@ -218,7 +248,8 @@ export class MeteoraDlmmService {
   async getActiveBin(poolAddress: string): Promise<ActiveBin> {
     try {
       const pool = await this.initializePool(poolAddress);
-      const activeBin = await (pool as any).getActiveBin();
+      const typedPool = pool as unknown as DLMMPool;
+      const activeBin = await typedPool.getActiveBin();
       
       return {
         binId: activeBin.binId,
@@ -272,8 +303,8 @@ export class MeteoraDlmmService {
    * Enhanced transaction simulation with better error reporting
    */
   async simulateTransaction(
-    transaction: Transaction,
-    userPublicKey: PublicKey
+    transaction: Transaction
+    // Remove unused userPublicKey parameter
   ): Promise<{ success: boolean; error?: DLMMError }> {
     try {
       const simulation = await this._connection.simulateTransaction(transaction, []);
@@ -351,7 +382,8 @@ export class MeteoraDlmmService {
   async getUserPositions(poolAddress: string, userPublicKey: PublicKey): Promise<DlmmPositionInfo[]> {
     try {
       const pool = await this.initializePool(poolAddress);
-      const { userPositions } = await (pool as any).getPositionsByUserAndLbPair(userPublicKey);
+      const typedPool = pool as unknown as DLMMPool;
+      const { userPositions } = await typedPool.getPositionsByUserAndLbPair(userPublicKey);
       
       const positions: DlmmPositionInfo[] = [];
       
@@ -382,6 +414,76 @@ export class MeteoraDlmmService {
   }
 
   // Add other existing methods with similar error handling...
+  
+  /**
+   * Get swap quote for token exchange
+   */
+  async getSwapQuote(
+    poolAddress: string,
+    amountIn: BN,
+    swapForY: boolean
+  ): Promise<SwapQuote> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      const typedPool = pool as unknown as DLMMPool;
+      
+      // This is a placeholder implementation - you'd need to implement the actual swap quote logic
+      // based on the Meteora DLMM SDK documentation
+      const quote = await typedPool.getSwapQuote({
+        inAmount: amountIn,
+        swapForY,
+        allowedSlippage: 0.5, // 0.5% slippage
+      });
+      
+      return {
+        amountIn: amountIn.toString(),
+        amountOut: quote.amountOut?.toString() || '0',
+        minOutAmount: quote.minAmountOut?.toString() || '0',
+        fee: quote.fee?.toString() || '0',
+        priceImpact: quote.priceImpact?.toString() || '0',
+        binArraysPubkey: quote.binArraysPubkey || []
+      };
+    } catch (error) {
+      throw new DLMMError(
+        DLMMErrorType.NETWORK_ERROR,
+        'Failed to get swap quote',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Execute a swap transaction
+   */
+  async swap(
+    poolAddress: string,
+    userPublicKey: PublicKey,
+    amountIn: BN,
+    minAmountOut: BN,
+    swapForY: boolean
+  ): Promise<Transaction> {
+    try {
+      const pool = await this.initializePool(poolAddress);
+      const typedPool = pool as unknown as DLMMPool;
+      
+      // This is a placeholder implementation - you'd need to implement the actual swap logic
+      // based on the Meteora DLMM SDK documentation
+      const swapTx = await typedPool.swap({
+        user: userPublicKey,
+        inAmount: amountIn,
+        minAmountOut,
+        swapForY,
+      });
+      
+      return swapTx;
+    } catch (error) {
+      throw new DLMMError(
+        DLMMErrorType.TRANSACTION_SIMULATION_FAILED,
+        'Failed to create swap transaction',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
 }
 
 // Enhanced hook with error handling

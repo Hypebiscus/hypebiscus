@@ -1,5 +1,5 @@
 // src/lib/services/existingRangeService.ts
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 import { MeteoraDlmmService } from '@/lib/meteora/meteoraDlmmService';
 
 interface ExistingRange {
@@ -20,6 +20,18 @@ interface RangeRecommendation {
   all: ExistingRange[];
 }
 
+// Define types to avoid any usage
+interface DLMMPool {
+  getActiveBin(): Promise<{
+    binId: number;
+    price: string;
+    xAmount: string;
+    yAmount: string;
+  }>;
+  getBin(binId: number): Promise<unknown>;
+  [key: string]: unknown;
+}
+
 export class ExistingRangeService {
   private dlmmService: MeteoraDlmmService;
 
@@ -33,19 +45,21 @@ export class ExistingRangeService {
   async findExistingRanges(poolAddress: string): Promise<RangeRecommendation> {
     try {
       const pool = await this.dlmmService.initializePool(poolAddress);
-      const activeBin = await pool.getActiveBin();
+      const typedPool = pool as unknown as DLMMPool;
+      const activeBin = await typedPool.getActiveBin();
       
       // Get all existing positions in the pool
       const existingPositions = await this.getPoolPositions(poolAddress);
       
       // Analyze ranges from existing positions
-      const rangeAnalysis = this.analyzeExistingRanges(existingPositions, activeBin.binId);
+      const rangeAnalysis = this.analyzeExistingRanges(existingPositions);
       
       // Generate recommendations
       return this.generateRecommendations(rangeAnalysis, activeBin.binId);
       
-    } catch (error) {
-      console.error('Error finding existing ranges:', error);
+    } catch {
+      // Remove unused error parameter
+      console.error('Error finding existing ranges');
       // Fallback to conservative defaults
       return this.getDefaultRanges(poolAddress);
     }
@@ -61,13 +75,14 @@ export class ExistingRangeService {
   }>> {
     try {
       const pool = await this.dlmmService.initializePool(poolAddress);
+      const typedPool = pool as unknown as DLMMPool;
       
       // Method 1: Try to get positions from program accounts
       // This is a simplified approach - in production you'd use more sophisticated querying
       
       // For now, we'll use a heuristic approach by checking common ranges
       // around the active bin that are likely to exist
-      const activeBin = await pool.getActiveBin();
+      const activeBin = await typedPool.getActiveBin();
       const commonRanges = [];
       
       // Check popular range patterns
@@ -80,7 +95,7 @@ export class ExistingRangeService {
           const maxBin = centerBin + width;
           
           // Check if this range has existing liquidity/bins
-          const hasLiquidity = await this.checkRangeHasLiquidity(pool, minBin, maxBin);
+          const hasLiquidity = await this.checkRangeHasLiquidity(typedPool, minBin, maxBin);
           
           if (hasLiquidity) {
             commonRanges.push({
@@ -93,8 +108,9 @@ export class ExistingRangeService {
       }
       
       return commonRanges;
-    } catch (error) {
-      console.error('Error getting pool positions:', error);
+    } catch {
+      // Remove unused error parameter
+      console.error('Error getting pool positions');
       return [];
     }
   }
@@ -102,7 +118,7 @@ export class ExistingRangeService {
   /**
    * Check if a range has existing liquidity (indicates existing binArrays)
    */
-  private async checkRangeHasLiquidity(pool: any, minBinId: number, maxBinId: number): Promise<boolean> {
+  private async checkRangeHasLiquidity(pool: DLMMPool, minBinId: number, maxBinId: number): Promise<boolean> {
     try {
       // Try to get bin data for a few bins in the range
       const sampleBins = [minBinId, Math.floor((minBinId + maxBinId) / 2), maxBinId];
@@ -114,13 +130,15 @@ export class ExistingRangeService {
           if (binData) {
             return true;
           }
-        } catch (error) {
+        } catch {
+          // Remove unused error parameter
           // Bin doesn't exist, continue checking
         }
       }
       
       return false;
-    } catch (error) {
+    } catch {
+      // Remove unused error parameter
       return false;
     }
   }
@@ -129,8 +147,8 @@ export class ExistingRangeService {
    * Analyze existing ranges to find patterns
    */
   private analyzeExistingRanges(
-    positions: Array<{ minBinId: number; maxBinId: number; liquidity: number }>,
-    activeBinId: number
+    positions: Array<{ minBinId: number; maxBinId: number; liquidity: number }>
+    // Remove unused activeBinId parameter
   ): ExistingRange[] {
     const rangeMap = new Map<string, ExistingRange>();
 
@@ -224,7 +242,8 @@ export class ExistingRangeService {
 
   private async getDefaultRanges(poolAddress: string): Promise<RangeRecommendation> {
     const pool = await this.dlmmService.initializePool(poolAddress);
-    const activeBin = await pool.getActiveBin();
+    const typedPool = pool as unknown as DLMMPool;
+    const activeBin = await typedPool.getActiveBin();
     return this.getDefaultRecommendations(activeBin.binId);
   }
 }
