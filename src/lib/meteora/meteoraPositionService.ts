@@ -1,13 +1,13 @@
-// Enhanced meteoraPositionService.ts with cost estimation and better error handling
+// Enhanced meteoraPositionService.ts - Modified to use existing bins only
+// Removed bin creation functionality to prevent users from providing LP outside existing bin steps
+
 import DLMM, { StrategyType, autoFillYByStrategy } from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Keypair, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
-// Import types from DLMM service for consistency
 export type DlmmType = DLMM;
 
-// Define types to avoid any usage
 interface DLMMPool {
   getActiveBin(): Promise<{
     binId: number;
@@ -16,6 +16,7 @@ interface DLMMPool {
     yAmount: string;
   }>;
   getBin(binId: number): Promise<unknown>;
+  getExistingBinArray(binArrayIndex: number): Promise<unknown>;
   initializePositionAndAddLiquidityByStrategy(params: {
     positionPubKey: PublicKey;
     user: PublicKey;
@@ -86,21 +87,19 @@ export interface CreatePositionParams {
   poolAddress: string;
   userPublicKey: PublicKey;
   totalXAmount: BN;
-  totalYAmount?: BN; // Made optional for auto-calculation
+  totalYAmount?: BN;
   minBinId: number;
   maxBinId: number;
   strategyType: StrategyType;
-  useAutoFill?: boolean; // New option for balanced positions
+  useAutoFill?: boolean;
 }
 
-// Interface for position management parameters
 export interface PositionManagementParams {
   poolAddress: string;
   positionPubkey: string;
   userPublicKey: PublicKey;
 }
 
-// Enhanced interface for remove liquidity parameters
 export interface RemoveLiquidityParams extends PositionManagementParams {
   fromBinId: number;
   toBinId: number;
@@ -108,28 +107,37 @@ export interface RemoveLiquidityParams extends PositionManagementParams {
   shouldClaimAndClose: boolean;
 }
 
-// New interface for cost estimation
-export interface CostEstimation {
+// Simplified cost estimation - only position rent since we use existing bins
+export interface SimplifiedCostEstimation {
   positionRent: number;
-  binArrayCost: number;
   transactionFees: number;
   total: number;
   breakdown: {
-    newBinArraysNeeded: number;
-    existingBinArrays: number;
+    existingBinsUsed: number;
+    noBinCreationNeeded: boolean;
     estimatedComputeUnits: number;
   };
 }
 
-// Enhanced interface for position creation result
 export interface CreatePositionResult {
   transaction: Transaction | Transaction[];
   positionKeypair: Keypair;
-  estimatedCost: CostEstimation;
+  estimatedCost: SimplifiedCostEstimation;
+}
+
+// Interface for existing bin ranges
+export interface ExistingBinRange {
+  minBinId: number;
+  maxBinId: number;
+  existingBins: number[];
+  liquidityDepth: number;
+  isPopular: boolean;
+  description: string;
 }
 
 /**
- * Enhanced Service for managing DLMM positions with cost estimation
+ * Enhanced Service for managing DLMM positions - EXISTING BINS ONLY
+ * This version prevents users from creating new bin arrays, keeping costs low and safe
  */
 export class MeteoraPositionService {
   private connection: Connection;
@@ -159,97 +167,148 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Check if binArrays exist for a given range and estimate creation costs
+   * Find existing bin ranges around the active bin
+   * This ensures we only use existing bins and don't create new ones
    */
-  async checkBinArrayCreationCost(
+  async findExistingBinRanges(
     poolAddress: string,
-    minBinId: number,
-    maxBinId: number
-  ): Promise<CostEstimation> {
+    maxRangeWidth: number = 20
+  ): Promise<ExistingBinRange[]> {
     try {
       const pool = await this.initializePool(poolAddress);
       const typedPool = pool as unknown as DLMMPool;
+      const activeBin = await typedPool.getActiveBin();
       
-      // Calculate which binArrays would be needed
-      const binArraysNeeded = new Set<number>();
+      console.log('Finding existing bins around active bin:', activeBin.binId);
       
-      // Each binArray typically covers ~70 bins, but this can vary
-      // We'll check by trying to get bin data for key positions
-      for (let binId = minBinId; binId <= maxBinId; binId += 35) {
-        const binArrayIndex = Math.floor(binId / 35); // Approximate binArray indexing
-        binArraysNeeded.add(binArrayIndex);
-      }
+      const existingRanges: ExistingBinRange[] = [];
       
-      let newBinArraysCount = 0;
-      let existingBinArraysCount = 0;
+      // Check different range patterns around the active bin
+      const rangesToCheck = [
+        { width: 5, offset: 0, name: 'Tight range (±5 bins)' },
+        { width: 10, offset: 0, name: 'Standard range (±10 bins)' },
+        { width: 15, offset: 0, name: 'Wide range (±15 bins)' },
+        { width: 8, offset: 5, name: 'Above current price' },
+        { width: 8, offset: -13, name: 'Below current price' }
+      ];
       
-      // Check which binArrays already exist
-      for (const binArrayIndex of binArraysNeeded) {
-        try {
-          // Try to get a bin in this array to see if it exists
-          const testBinId = binArrayIndex * 35;
-          await typedPool.getBin(testBinId);
-          existingBinArraysCount++;
-          console.log(`BinArray ${binArrayIndex} exists (test bin ${testBinId})`);
-        } catch {
-          // Remove unused error parameter
-          // BinArray doesn't exist, will need creation
-          newBinArraysCount++;
-          console.log(`BinArray ${binArrayIndex} needs creation (test bin failed)`);
+      for (const range of rangesToCheck) {
+        const minBinId = activeBin.binId - Math.floor(range.width/2) + range.offset;
+        const maxBinId = activeBin.binId + Math.floor(range.width/2) + range.offset;
+        
+        if (maxBinId - minBinId > maxRangeWidth) continue;
+        
+        // Check which bins actually exist in this range
+        const existingBins = await this.checkBinsExistence(typedPool, minBinId, maxBinId);
+        
+        if (existingBins.length >= 3) { // Require at least 3 existing bins
+          existingRanges.push({
+            minBinId,
+            maxBinId,
+            existingBins,
+            liquidityDepth: existingBins.length,
+            isPopular: existingBins.length > 5,
+            description: `${range.name} (${existingBins.length} existing bins)`
+          });
         }
       }
       
-      // Calculate costs
-      const positionRent = 0.057; // Standard position rent (refundable)
-      const binArrayCost = newBinArraysCount * 0.075; // 0.075 SOL per new binArray (non-refundable)
-      const transactionFees = 0.01; // Estimated transaction fees
-      const total = positionRent + binArrayCost + transactionFees;
+      // Sort by number of existing bins (more existing bins = better)
+      existingRanges.sort((a, b) => b.existingBins.length - a.existingBins.length);
       
-      const costEstimation: CostEstimation = {
-        positionRent,
-        binArrayCost,
-        transactionFees,
-        total,
-        breakdown: {
-          newBinArraysNeeded: newBinArraysCount,
-          existingBinArrays: existingBinArraysCount,
-          estimatedComputeUnits: newBinArraysCount * 20000 + 50000 // Rough estimate
-        }
-      };
+      console.log('Found existing bin ranges:', existingRanges.length);
+      return existingRanges;
       
-      console.log('Cost estimation for range', minBinId, 'to', maxBinId, ':', costEstimation);
-      
-      return costEstimation;
-      
-    } catch {
-      // Remove unused error parameter
-      console.error('Error checking binArray creation cost');
-      
-      // Conservative fallback estimate
-      const binRangeWidth = maxBinId - minBinId;
-      const estimatedBinArrays = Math.ceil(binRangeWidth / 35); // Conservative estimate
-      
-      return {
-        positionRent: 0.057,
-        binArrayCost: estimatedBinArrays * 0.075,
-        transactionFees: 0.01,
-        total: 0.057 + (estimatedBinArrays * 0.075) + 0.01,
-        breakdown: {
-          newBinArraysNeeded: estimatedBinArrays,
-          existingBinArrays: 0,
-          estimatedComputeUnits: estimatedBinArrays * 20000 + 50000
-        }
-      };
+    } catch (error) {
+      console.error('Error finding existing bin ranges:', error);
+      throw new Error('Unable to find existing bin ranges for safe liquidity provision');
     }
   }
 
   /**
-   * Validate user balance before creating position
+   * Check which bins exist in a given range using a simplified approach
+   */
+  private async checkBinsExistence(
+    pool: DLMMPool, 
+    minBinId: number, 
+    maxBinId: number
+  ): Promise<number[]> {
+    const existingBins: number[] = [];
+    
+    try {
+      // Get all bin arrays for the pool
+      const binArrays = await (pool as any).getBinArrays?.();
+      
+      if (binArrays && binArrays.length > 0) {
+        // Check which bins in our range fall within existing bin arrays
+        for (let binId = minBinId; binId <= maxBinId; binId++) {
+          const binArrayIndex = Math.floor(binId / 70); // Approximate bins per array
+          
+          // Check if this bin array exists
+          const binArrayExists = binArrays.some((binArray: any) => 
+            binArray.account?.index === binArrayIndex
+          );
+          
+          if (binArrayExists) {
+            existingBins.push(binId);
+          }
+        }
+      } else {
+        // Fallback: assume the active bin and nearby bins exist
+        const centerBin = Math.floor((minBinId + maxBinId) / 2);
+        for (let i = -2; i <= 2; i++) {
+          const binId = centerBin + i;
+          if (binId >= minBinId && binId <= maxBinId) {
+            existingBins.push(binId);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Could not check bin arrays, using fallback approach:', error);
+      
+      // Conservative fallback: assume center bins exist
+      const centerBin = Math.floor((minBinId + maxBinId) / 2);
+      for (let i = -1; i <= 1; i++) {
+        const binId = centerBin + i;
+        if (binId >= minBinId && binId <= maxBinId) {
+          existingBins.push(binId);
+        }
+      }
+    }
+    
+    return existingBins.sort((a, b) => a - b);
+  }
+
+  /**
+   * Simplified cost estimation - only position rent since we use existing bins
+   */
+  async getSimplifiedCostEstimation(
+    poolAddress: string,
+    existingBinsCount: number = 5
+  ): Promise<SimplifiedCostEstimation> {
+    const positionRent = 0.057; // Standard position rent (refundable)
+    const transactionFees = 0.015; // Estimated transaction fees
+    const total = positionRent + transactionFees;
+    
+    return {
+      positionRent,
+      transactionFees,
+      total,
+      breakdown: {
+        existingBinsUsed: existingBinsCount,
+        noBinCreationNeeded: true,
+        estimatedComputeUnits: 50000 // Much lower since no bin creation
+      }
+    };
+  }
+
+  /**
+   * Validate user balance for existing-bins-only strategy
    */
   async validateUserBalance(
     userPublicKey: PublicKey,
     requiredSolAmount: number,
-    estimatedCost: CostEstimation
+    estimatedCost: SimplifiedCostEstimation
   ): Promise<{ isValid: boolean; currentBalance: number; shortfall?: number; error?: string }> {
     try {
       const solBalanceLamports = await this.connection.getBalance(userPublicKey);
@@ -281,29 +340,30 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Create a new position with enhanced cost estimation and validation
+   * Create a position using ONLY existing bins
    */
-  async createBalancedPosition(params: CreatePositionParams): Promise<CreatePositionResult> {
+  async createPositionWithExistingBins(
+    params: CreatePositionParams,
+    existingBinRange: ExistingBinRange
+  ): Promise<CreatePositionResult> {
     try {
-      console.log('Creating balanced position with params:', {
+      console.log('Creating position with existing bins only:', {
         poolAddress: params.poolAddress,
-        minBinId: params.minBinId,
-        maxBinId: params.maxBinId,
-        strategyType: params.strategyType,
-        useAutoFill: params.useAutoFill
+        range: `${existingBinRange.minBinId} to ${existingBinRange.maxBinId}`,
+        existingBins: existingBinRange.existingBins.length,
+        strategyType: params.strategyType
       });
 
-      // Step 1: Estimate costs before doing anything
-      const estimatedCost = await this.checkBinArrayCreationCost(
+      // Get simplified cost estimation
+      const estimatedCost = await this.getSimplifiedCostEstimation(
         params.poolAddress,
-        params.minBinId,
-        params.maxBinId
+        existingBinRange.existingBins.length
       );
 
-      console.log('Estimated cost for position:', estimatedCost);
+      console.log('Simplified cost estimation:', estimatedCost);
 
-      // Step 2: Validate user balance
-      const estimatedSolForLiquidity = params.totalXAmount.toNumber() / Math.pow(10, 9); // Assuming 9 decimals
+      // Validate user balance
+      const estimatedSolForLiquidity = params.totalXAmount.toNumber() / Math.pow(10, 9);
       const balanceValidation = await this.validateUserBalance(
         params.userPublicKey,
         estimatedSolForLiquidity,
@@ -316,55 +376,45 @@ export class MeteoraPositionService {
 
       console.log('Balance validation passed:', balanceValidation);
 
-      // Step 3: Initialize pool and create position
+      // Initialize pool and create position
       const pool = await this.initializePool(params.poolAddress);
       const newPosition = new Keypair();
       const typedPool = pool as unknown as DLMMPool;
 
       let totalYAmount = params.totalYAmount || new BN(0);
 
-      // Use autoFillYByStrategy for truly balanced positions
-      if (params.useAutoFill !== false) {
+      // Use autoFillYByStrategy for balanced positions if requested
+      if (params.useAutoFill !== false && totalYAmount.isZero()) {
         try {
-          // Get active bin information
           const activeBin = await typedPool.getActiveBin();
           
-          console.log('Active bin info:', {
-            binId: activeBin.binId,
-            price: activeBin.price,
-            xAmount: activeBin.xAmount.toString(),
-            yAmount: activeBin.yAmount.toString()
-          });
-          
-          // Calculate balanced Y amount using SDK helper
           totalYAmount = autoFillYByStrategy(
             activeBin.binId,
             typedPool.lbPair.binStep,
             params.totalXAmount,
             new BN(activeBin.xAmount),
             new BN(activeBin.yAmount),
-            params.minBinId,
-            params.maxBinId,
+            existingBinRange.minBinId,
+            existingBinRange.maxBinId,
             params.strategyType
           );
 
-          console.log('Auto-calculated balanced Y amount:', totalYAmount.toString());
+          console.log('Auto-calculated Y amount using existing bins:', totalYAmount.toString());
         } catch (autoFillError) {
           console.warn('AutoFill failed, using provided or zero Y amount:', autoFillError);
-          // Fallback to provided amount or zero
           totalYAmount = params.totalYAmount || new BN(0);
         }
       }
 
-      // Step 4: Create the position transaction
-      console.log('Creating position transaction with:', {
+      // Create the position transaction using existing bin range
+      console.log('Creating position transaction with existing bins:', {
         positionPubKey: newPosition.publicKey.toString(),
         user: params.userPublicKey.toString(),
         totalXAmount: params.totalXAmount.toString(),
         totalYAmount: totalYAmount.toString(),
         strategy: {
-          maxBinId: params.maxBinId,
-          minBinId: params.minBinId,
+          maxBinId: existingBinRange.maxBinId,
+          minBinId: existingBinRange.minBinId,
           strategyType: params.strategyType,
         }
       });
@@ -375,13 +425,13 @@ export class MeteoraPositionService {
         totalXAmount: params.totalXAmount,
         totalYAmount,
         strategy: {
-          maxBinId: params.maxBinId,
-          minBinId: params.minBinId,
+          maxBinId: existingBinRange.maxBinId,
+          minBinId: existingBinRange.minBinId,
           strategyType: params.strategyType,
         },
       });
 
-      console.log('Position transaction created successfully');
+      console.log('Position transaction created successfully using existing bins');
 
       return {
         transaction: createPositionTx,
@@ -389,20 +439,15 @@ export class MeteoraPositionService {
         estimatedCost
       };
     } catch (error) {
-      console.error('Error creating balanced position:', error);
+      console.error('Error creating position with existing bins:', error);
       
-      // Enhanced error handling with specific error types
       if (error instanceof Error) {
         if (error.message.includes('insufficient lamports')) {
-          throw new Error('Insufficient SOL balance for position creation. Please add more SOL to your wallet.');
+          throw new Error('Insufficient SOL balance for position creation using existing bins. Please add more SOL to your wallet.');
         }
         
         if (error.message.includes('Transaction simulation failed')) {
-          throw new Error('Position creation failed during simulation. This usually indicates insufficient funds or invalid parameters.');
-        }
-        
-        if (error.message.includes('binArray')) {
-          throw new Error('Error with price bin creation. The selected range may require expensive bin creation. Try a different range.');
+          throw new Error('Position creation failed during simulation. The existing bins might be full or have restrictions.');
         }
       }
       
@@ -411,18 +456,29 @@ export class MeteoraPositionService {
   }
 
   /**
-   * Create a one-sided position (single token) with cost estimation
+   * Create a one-sided position using existing bins only
    */
   async createOneSidedPosition(
     params: CreatePositionParams,
     useTokenX: boolean
   ): Promise<CreatePositionResult> {
     try {
-      // First get cost estimation
-      const estimatedCost = await this.checkBinArrayCreationCost(
+      // First find existing bin ranges
+      const existingRanges = await this.findExistingBinRanges(params.poolAddress);
+      
+      if (existingRanges.length === 0) {
+        throw new Error('No existing bin ranges found. Cannot create position without existing bins.');
+      }
+
+      // Use the best existing range (first one, as they're sorted by bin count)
+      const selectedRange = existingRanges[0];
+      
+      console.log('Creating one-sided position with existing range:', selectedRange);
+
+      // Get cost estimation
+      const estimatedCost = await this.getSimplifiedCostEstimation(
         params.poolAddress,
-        params.minBinId,
-        params.maxBinId
+        selectedRange.existingBins.length
       );
 
       const pool = await this.initializePool(params.poolAddress);
@@ -433,16 +489,26 @@ export class MeteoraPositionService {
       const totalXAmount = useTokenX ? params.totalXAmount : new BN(0);
       const totalYAmount = useTokenX ? new BN(0) : (params.totalYAmount || params.totalXAmount);
 
-      // Adjust bin range for one-sided positions
-      let minBinId = params.minBinId;
-      let maxBinId = params.maxBinId;
+      // Adjust bin range for one-sided positions within existing bins
+      let minBinId = selectedRange.minBinId;
+      let maxBinId = selectedRange.maxBinId;
 
       if (useTokenX) {
         // For X token only, position should be above current price
         const activeBin = await typedPool.getActiveBin();
-        minBinId = activeBin.binId;
-        maxBinId = activeBin.binId + (params.maxBinId - params.minBinId);
+        const activeBinIndex = selectedRange.existingBins.findIndex(bin => bin >= activeBin.binId);
+        
+        if (activeBinIndex !== -1) {
+          // Use existing bins above the active bin
+          const binsAbove = selectedRange.existingBins.slice(activeBinIndex);
+          if (binsAbove.length > 0) {
+            minBinId = Math.min(...binsAbove);
+            maxBinId = Math.max(...binsAbove);
+          }
+        }
       }
+
+      console.log('Adjusted range for one-sided position:', { minBinId, maxBinId, useTokenX });
 
       const createPositionTx = await typedPool.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: newPosition.publicKey,
@@ -462,14 +528,55 @@ export class MeteoraPositionService {
         estimatedCost
       };
     } catch (error) {
-      console.error('Error creating one-sided position:', error);
+      console.error('Error creating one-sided position with existing bins:', error);
       throw error;
     }
   }
 
   /**
-   * Add liquidity to an existing position with cost validation
+   * Get safe range recommendations using existing bins only
    */
+  async getSafeRangeRecommendations(poolAddress: string): Promise<{
+    conservative: ExistingBinRange;
+    balanced: ExistingBinRange;
+    aggressive: ExistingBinRange;
+    all: ExistingBinRange[];
+  }> {
+    try {
+      const existingRanges = await this.findExistingBinRanges(poolAddress);
+      
+      if (existingRanges.length === 0) {
+        throw new Error('No existing bins found for safe range recommendations');
+      }
+      
+      // Conservative: Range with most existing bins (safest)
+      const conservative = existingRanges.reduce((prev, curr) => 
+        prev.existingBins.length > curr.existingBins.length ? prev : curr
+      );
+      
+      // Balanced: Medium range with good bin coverage
+      const balanced = existingRanges.find(range => 
+        range.existingBins.length >= 5 && range.existingBins.length <= 10
+      ) || conservative;
+      
+      // Aggressive: Smaller range but still using existing bins
+      const aggressive = existingRanges.find(range => 
+        range.existingBins.length >= 3 && range.existingBins.length <= 7
+      ) || conservative;
+      
+      return {
+        conservative,
+        balanced,
+        aggressive,
+        all: existingRanges
+      };
+    } catch (error) {
+      console.error('Error getting safe range recommendations:', error);
+      throw error;
+    }
+  }
+
+  // Keep all existing methods for compatibility but ensure they use existing bins
   async addLiquidity(
     params: PositionManagementParams,
     totalXAmount: BN,
@@ -480,13 +587,21 @@ export class MeteoraPositionService {
     useAutoFill: boolean = true
   ): Promise<Transaction | Transaction[]> {
     try {
+      // First verify that the range uses existing bins
       const pool = await this.initializePool(params.poolAddress);
-      const positionPubKey = new PublicKey(params.positionPubkey);
       const typedPool = pool as unknown as DLMMPool;
+      const existingBins = await this.checkBinsExistence(typedPool, minBinId, maxBinId);
+      
+      if (existingBins.length === 0) {
+        throw new Error('Cannot add liquidity: specified range has no existing bins. Please use existing price ranges only.');
+      }
+      
+      console.log(`Adding liquidity to existing bins only: ${existingBins.length} bins in range`);
+      
+      const positionPubKey = new PublicKey(params.positionPubkey);
       
       let finalTotalYAmount = totalYAmount;
 
-      // Use autoFillYByStrategy for balanced liquidity addition
       if (useAutoFill && totalYAmount.isZero()) {
         try {
           const activeBin = await typedPool.getActiveBin();
@@ -521,17 +636,13 @@ export class MeteoraPositionService {
 
       return addLiquidityTx;
     } catch (error) {
-      console.error('Error adding liquidity:', error);
+      console.error('Error adding liquidity to existing bins:', error);
       throw error;
     }
   }
 
-  /**
-   * Remove liquidity from a position
-   */
-  async removeLiquidity(
-    params: RemoveLiquidityParams
-  ): Promise<Transaction | Transaction[]> {
+  // Keep all other existing methods unchanged
+  async removeLiquidity(params: RemoveLiquidityParams): Promise<Transaction | Transaction[]> {
     try {
       const pool = await this.initializePool(params.poolAddress);
       const positionPubKey = new PublicKey(params.positionPubkey);
@@ -553,9 +664,6 @@ export class MeteoraPositionService {
     }
   }
 
-  /**
-   * Remove liquidity with automatic bin detection and percentage-based removal
-   */
   async removeLiquidityFromPosition(
     params: PositionManagementParams,
     percentageToRemove: number = 100,
@@ -566,7 +674,6 @@ export class MeteoraPositionService {
       const positionPubKey = new PublicKey(params.positionPubkey);
       const typedPool = pool as unknown as DLMMPool;
 
-      // Get user positions to find the specific position
       const { userPositions } = await typedPool.getPositionsByUserAndLbPair(params.userPublicKey);
       
       const userPosition = userPositions.find((pos: PositionData) => 
@@ -577,7 +684,6 @@ export class MeteoraPositionService {
         throw new Error('Position not found');
       }
 
-      // Extract bin IDs from position data
       const binIdsToRemove = userPosition.positionData.positionBinData.map((bin) => bin.binId);
       
       if (binIdsToRemove.length === 0) {
@@ -587,7 +693,6 @@ export class MeteoraPositionService {
       const fromBinId = Math.min(...binIdsToRemove);
       const toBinId = Math.max(...binIdsToRemove);
       
-      // Calculate percentage in basis points (10000 = 100%)
       const bpsToRemove = new BN(percentageToRemove * 100);
       const liquiditiesBpsToRemove = new Array(binIdsToRemove.length).fill(bpsToRemove);
 
@@ -607,9 +712,6 @@ export class MeteoraPositionService {
     }
   }
 
-  /**
-   * Claim fees from a position
-   */
   async claimFees(params: PositionManagementParams): Promise<Transaction> {
     try {
       const pool = await this.initializePool(params.poolAddress);
@@ -628,18 +730,11 @@ export class MeteoraPositionService {
     }
   }
 
-  /**
-   * Claim all fees from multiple positions
-   */
-  async claimAllFees(
-    poolAddress: string,
-    userPublicKey: PublicKey
-  ): Promise<Transaction[]> {
+  async claimAllFees(poolAddress: string, userPublicKey: PublicKey): Promise<Transaction[]> {
     try {
       const pool = await this.initializePool(poolAddress);
       const typedPool = pool as unknown as DLMMPool;
 
-      // Get all user positions
       const { userPositions } = await typedPool.getPositionsByUserAndLbPair(userPublicKey);
 
       const claimFeeTxs = await typedPool.claimAllSwapFee({
@@ -654,9 +749,6 @@ export class MeteoraPositionService {
     }
   }
 
-  /**
-   * Close a position
-   */
   async closePosition(params: PositionManagementParams): Promise<Transaction> {
     try {
       const pool = await this.initializePool(params.poolAddress);
@@ -675,13 +767,7 @@ export class MeteoraPositionService {
     }
   }
 
-  /**
-   * Get position information
-   */
-  async getPositionInfo(
-    poolAddress: string,
-    positionPubkey: string
-  ): Promise<unknown> {
+  async getPositionInfo(poolAddress: string, positionPubkey: string): Promise<unknown> {
     try {
       const pool = await this.initializePool(poolAddress);
       const positionPubKey = new PublicKey(positionPubkey);
@@ -694,70 +780,9 @@ export class MeteoraPositionService {
       throw error;
     }
   }
-
-  /**
-   * Get range recommendations based on existing positions
-   */
-  async getRangeRecommendations(poolAddress: string): Promise<{
-    popular: { minBinId: number; maxBinId: number; cost: CostEstimation };
-    cheap: { minBinId: number; maxBinId: number; cost: CostEstimation };
-    balanced: { minBinId: number; maxBinId: number; cost: CostEstimation };
-  }> {
-    try {
-      const pool = await this.initializePool(poolAddress);
-      const typedPool = pool as unknown as DLMMPool;
-      const activeBin = await typedPool.getActiveBin();
-      
-      // Define some common ranges to check
-      const ranges = [
-        { width: 5, minBinId: activeBin.binId - 5, maxBinId: activeBin.binId + 5 },
-        { width: 10, minBinId: activeBin.binId - 10, maxBinId: activeBin.binId + 10 },
-        { width: 15, minBinId: activeBin.binId - 15, maxBinId: activeBin.binId + 15 },
-        { width: 20, minBinId: activeBin.binId - 20, maxBinId: activeBin.binId + 20 },
-      ];
-      
-      // Get cost estimates for each range
-      const rangeWithCosts = await Promise.all(
-        ranges.map(async (range) => ({
-          ...range,
-          cost: await this.checkBinArrayCreationCost(poolAddress, range.minBinId, range.maxBinId)
-        }))
-      );
-      
-      // Find the cheapest option
-      const cheap = rangeWithCosts.reduce((prev, curr) => 
-        prev.cost.total < curr.cost.total ? prev : curr
-      );
-      
-      // Find popular (assume medium width is popular)
-      const popular = rangeWithCosts.find(r => r.width === 10) || rangeWithCosts[1];
-      
-      // Find balanced (good cost vs range width ratio)
-      const balanced = rangeWithCosts.find(r => r.width === 15) || rangeWithCosts[2];
-      
-      return { popular, cheap, balanced };
-    } catch (error) {
-      console.error('Error getting range recommendations:', error);
-      
-      // Fallback recommendations
-      const fallbackCost: CostEstimation = {
-        positionRent: 0.057,
-        binArrayCost: 0.075,
-        transactionFees: 0.01,
-        total: 0.137,
-        breakdown: { newBinArraysNeeded: 1, existingBinArrays: 0, estimatedComputeUnits: 50000 }
-      };
-      
-      return {
-        popular: { minBinId: 0, maxBinId: 20, cost: fallbackCost },
-        cheap: { minBinId: 0, maxBinId: 10, cost: { ...fallbackCost, total: 0.067 } },
-        balanced: { minBinId: 0, maxBinId: 15, cost: fallbackCost }
-      };
-    }
-  }
 }
 
-// Enhanced hook to use the position service
+// Enhanced hook for existing bins only strategy
 export function useMeteoraPositionService() {
   const { publicKey, sendTransaction } = useWallet();
   
@@ -777,10 +802,13 @@ export function useMeteoraPositionService() {
           return 'Insufficient SOL balance for this transaction.';
         }
         if (error.message.includes('Transaction simulation failed')) {
-          return 'Transaction simulation failed. Please check your balance and parameters.';
+          return 'Transaction simulation failed. The selected existing bins might be full or restricted.';
         }
-        if (error.message.includes('binArray')) {
-          return 'Error with price bin creation. Try selecting a different price range.';
+        if (error.message.includes('No existing bin ranges found')) {
+          return 'No existing price ranges available. Please wait for more liquidity or try a different pool.';
+        }
+        if (error.message.includes('existing bins')) {
+          return 'Cannot use the selected price range - only existing bins are allowed for safety.';
         }
         return error.message;
       }

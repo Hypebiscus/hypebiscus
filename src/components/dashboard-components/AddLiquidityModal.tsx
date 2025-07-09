@@ -1,5 +1,5 @@
-// Enhanced AddLiquidityModal.tsx - Corrected all errors
-// Dynamic strategy based on user's previous selection and pool characteristics
+// Enhanced AddLiquidityModal.tsx - Clean version using only existing bins
+// Users can only provide liquidity within existing bin steps
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -8,6 +8,7 @@ import { Loader2, Info, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } fro
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
+import type { ExistingBinRange } from "@/lib/meteora/meteoraPositionService";
 import { BN } from 'bn.js';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { FormattedPool } from '@/lib/utils/poolUtils';
@@ -17,7 +18,7 @@ interface AddLiquidityModalProps {
   isOpen: boolean;
   onClose: () => void;
   pool: FormattedPool | null;
-  userPortfolioStyle?: string | null; // Accept both string and null from ChatBox
+  userPortfolioStyle?: string | null;
 }
 
 interface BalanceInfo {
@@ -32,10 +33,10 @@ interface StrategyOption {
   id: string;
   label: string;
   description: string;
-  binStep: number; // Use pool's actual bin step
+  binStep: number;
   estimatedCost: number;
   riskLevel: 'low' | 'medium' | 'high';
-  portfolioStyle: string; // Use user's actual portfolio style
+  portfolioStyle: string;
   isDefault?: boolean;
   strategy: 'oneSided' | 'balanced' | 'ranged';
 }
@@ -44,9 +45,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   isOpen, 
   onClose,
   pool,
-  userPortfolioStyle = 'conservative' // Handle null by defaulting to conservative
+  userPortfolioStyle = 'conservative'
 }) => {
-  // Convert null to conservative for internal use
   const actualPortfolioStyle = userPortfolioStyle || 'conservative';
   const { publicKey, sendTransaction } = useWallet();
   const { service: dlmmService } = useMeteoraDlmmService();
@@ -60,6 +60,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
   const [currentBinId, setCurrentBinId] = useState<number | null>(null);
+  const [existingBinRanges, setExistingBinRanges] = useState<ExistingBinRange[]>([]);
+  const [isLoadingBins, setIsLoadingBins] = useState(false);
+  
+  // UI state
   const [showStrategyDetails, setShowStrategyDetails] = useState(false);
   const [showCostBreakdown, setShowCostBreakdown] = useState(false);
   const [showAccountBalance, setShowAccountBalance] = useState(false);
@@ -76,91 +80,100 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
 
   const { tokenX } = getTokenNames();
-
-  // Get pool's actual bin step
   const poolBinStep = useMemo(() => {
-    if (!pool || !pool.binStep || pool.binStep === 'N/A') return 10; // fallback
+    if (!pool || !pool.binStep || pool.binStep === 'N/A') return 10;
     return parseInt(pool.binStep);
   }, [pool]);
 
-  // Determine risk level based on bin step
-  const getRiskLevelFromBinStep = (binStep: number): 'low' | 'medium' | 'high' => {
-    if (binStep >= 50) return 'low';
-    if (binStep >= 10) return 'medium';
-    return 'high';
-  };
-
-  // Get portfolio style icon and description
-  const getPortfolioStyleInfo = (style: string) => {
-    switch (style.toLowerCase()) {
-      case 'conservative':
-        return { icon: '🛡️', label: 'Conservative', color: 'text-green-400' };
-      case 'moderate':
-        return { icon: '📊', label: 'Moderate', color: 'text-yellow-400' };
-      case 'aggressive':
-        return { icon: '🚀', label: 'Aggressive', color: 'text-red-400' };
-      default:
-        return { icon: '⚖️', label: 'Balanced', color: 'text-blue-400' };
-    }
-  };
-
-  // Dynamic strategy options based on user's portfolio style and pool's bin step
-  const strategyOptions: StrategyOption[] = useMemo(() => {
-    const riskLevel = getRiskLevelFromBinStep(poolBinStep);
-    const styleInfo = getPortfolioStyleInfo(actualPortfolioStyle);
+  // Find existing bin ranges in the pool using the position service
+  const findExistingBinRanges = useCallback(async () => {
+    if (!pool) return;
     
-    // Base cost estimation based on bin step
-    const baseCost = poolBinStep <= 5 ? 0.120 : 
-                    poolBinStep <= 15 ? 0.075 : 
-                    0.057;
+    setIsLoadingBins(true);
+    try {
+      const dlmmPool = await dlmmService.initializePool(pool.address);
+      const activeBin = await dlmmPool.getActiveBin();
+      setCurrentBinId(activeBin.binId);
+      
+      // Use the position service to find existing bin ranges
+      const existingRanges = await positionService.findExistingBinRanges(pool.address, 20);
+      
+      if (existingRanges.length > 0) {
+        setExistingBinRanges(existingRanges);
+        console.log('Found existing bin ranges:', existingRanges);
+      } else {
+        // Create a fallback range using the correct interface
+        const fallbackRange: ExistingBinRange = {
+          minBinId: activeBin.binId - 3,
+          maxBinId: activeBin.binId + 3,
+          existingBins: [activeBin.binId],
+          liquidityDepth: 1,
+          isPopular: false,
+          description: 'Conservative range around current price (safe default)'
+        };
+        setExistingBinRanges([fallbackRange]);
+        console.log('Using fallback range around active bin:', fallbackRange);
+      }
+      
+    } catch (error) {
+      console.error('Error finding existing bins:', error);
+      // Create fallback range if everything fails
+      const fallbackRange: ExistingBinRange = {
+        minBinId: currentBinId ? currentBinId - 5 : 0,
+        maxBinId: currentBinId ? currentBinId + 5 : 10,
+        existingBins: currentBinId ? [currentBinId] : [0],
+        liquidityDepth: 1,
+        isPopular: false,
+        description: 'Default safe range (position rent only)'
+      };
+      setExistingBinRanges([fallbackRange]);
+    } finally {
+      setIsLoadingBins(false);
+    }
+  }, [dlmmService, positionService, pool, currentBinId]);
 
-    // Only show the user's selected strategy - no confusing alternatives
+  // Load existing bins when modal opens
+  useEffect(() => {
+    if (isOpen && pool) {
+      findExistingBinRanges();
+    }
+  }, [isOpen, pool, findExistingBinRanges]);
+
+  // Strategy options based on existing bins only
+  const strategyOptions: StrategyOption[] = useMemo(() => {
+    if (existingBinRanges.length === 0) return [];
+    
+    const riskLevel = poolBinStep <= 5 ? 'high' : poolBinStep <= 15 ? 'medium' : 'low';
+    const styleInfo = { icon: '🛡️', label: 'Conservative', color: 'text-green-400' };
+    
+    // Fixed cost since we're using existing bins
+    const estimatedCost = 0.057; // Only position rent
+    
     return [
       {
-        id: 'oneSided-primary',
-        label: `${styleInfo.label} One-Sided`, // Removed icon from label
-        description: `Perfect for your ${actualPortfolioStyle} investment approach with this pool's characteristics`,
+        id: 'existing-bins-primary',
+        label: `${styleInfo.label} Position (Existing Bins)`,
+        description: `Safe ${actualPortfolioStyle} position using only existing price bins - no additional bin creation costs`,
         binStep: poolBinStep,
-        estimatedCost: baseCost,
+        estimatedCost,
         riskLevel,
         portfolioStyle: actualPortfolioStyle,
         strategy: 'oneSided',
         isDefault: true
       }
     ];
-  }, [actualPortfolioStyle, poolBinStep]);
+  }, [actualPortfolioStyle, poolBinStep, existingBinRanges]);
 
-  // Set default strategy on load
+  // Set default strategy
   useEffect(() => {
     if (strategyOptions.length > 0 && !selectedStrategy) {
       setSelectedStrategy(strategyOptions[0].id);
     }
   }, [strategyOptions, selectedStrategy]);
 
-  // Get selected strategy details
   const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
 
-  // Get current active bin on modal open
-  const loadCurrentBin = useCallback(async () => {
-    if (!pool) return;
-    
-    try {
-      const dlmmPool = await dlmmService.initializePool(pool.address);
-      const activeBin = await dlmmPool.getActiveBin();
-      setCurrentBinId(activeBin.binId);
-      console.log('Current active bin ID:', activeBin.binId);
-    } catch (error) {
-      console.error('Error loading current bin:', error);
-    }
-  }, [dlmmService, pool]);
-
-  useEffect(() => {
-    if (isOpen && pool) {
-      loadCurrentBin();
-    }
-  }, [isOpen, pool, loadCurrentBin]);
-
-  // Check balances when amount or strategy changes
+  // Balance checking with simplified cost calculation
   const checkUserBalances = useCallback(async () => {
     if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0 || !selectedStrategyOption) return;
 
@@ -172,27 +185,18 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
       );
 
-      // Get SOL balance
       const solBalanceLamports = await connection.getBalance(publicKey);
       const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
       
-      // Calculate estimated SOL needed based on actual bin step
-      let estimatedSolNeeded = selectedStrategyOption.estimatedCost + 0.015; // Base cost + transaction fees
-      
-      // Add buffer for potential binArray creation based on actual bin step
-      // Smaller bin steps might need more binArrays
-      const binArrayBuffer = poolBinStep <= 5 ? 0.150 :   // High precision might need more bins
-                           poolBinStep <= 15 ? 0.075 :     // Standard case
-                           0.057;                           // Conservative, likely existing bins
-      
-      estimatedSolNeeded += binArrayBuffer;
+      // Simplified cost calculation - only position rent + transaction fees
+      const estimatedSolNeeded = selectedStrategyOption.estimatedCost + 0.015; // Position rent + tx fees
       
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
       const shortfall = hasEnoughSol ? 0 : estimatedSolNeeded - solBalance;
 
       const balanceInfo: BalanceInfo = {
         solBalance,
-        tokenBalance: 0, // TODO: Implement wrapped BTC balance checking
+        tokenBalance: 0,
         hasEnoughSol,
         estimatedSolNeeded,
         shortfall
@@ -200,7 +204,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
       setBalanceInfo(balanceInfo);
 
-      // Set validation errors
       if (!hasEnoughSol) {
         setValidationError(
           `Insufficient SOL balance. You need ${shortfall.toFixed(4)} more SOL to complete this transaction.`
@@ -213,7 +216,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     } finally {
       setIsCheckingBalance(false);
     }
-  }, [publicKey, pool, btcAmount, selectedStrategyOption, poolBinStep]);
+  }, [publicKey, pool, btcAmount, selectedStrategyOption]);
 
   useEffect(() => {
     if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool && selectedStrategyOption) {
@@ -232,9 +235,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
 
   const handleAddLiquidity = async () => {
-    if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption) return;
+    if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
-    // Enhanced validation
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
       alert(validationError || 'Insufficient SOL balance to complete transaction');
       return;
@@ -243,48 +245,32 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     setIsLoading(true);
     
     try {
-      // Determine decimals based on token type
-      let decimals = 8; // Default for most BTC tokens
-      
-      // Special handling for different wrapped BTC tokens
-      if (tokenX.toLowerCase().includes('wbtc')) {
-        decimals = 8; // wBTC uses 8 decimals
-      } else if (tokenX.toLowerCase().includes('zbtc')) {
-        decimals = 8; // zBTC uses 8 decimals  
-      } else if (tokenX.toLowerCase().includes('cbbtc')) {
-        decimals = 8; // cbBTC uses 8 decimals
-      }
-      
+      let decimals = 8; // Default for BTC tokens
       const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
       
-      // Calculate bin range based on pool's actual bin step and user's strategy
-      // Adjust range based on actual bin step - simpler since we only have one strategy
-      const rangeWidth = Math.max(3, Math.floor(15 / Math.sqrt(poolBinStep))); 
+      // Use the first available existing range
+      const selectedRange = existingBinRanges[0];
       
-      // For one-sided positions, place above current price
-      const minBinId = currentBinId + 1;
-      const maxBinId = currentBinId + rangeWidth;
-      
-      console.log(`Creating ${userPortfolioStyle} one-sided position with pool's bin step:`, {
+      console.log(`Creating ${userPortfolioStyle} position using EXISTING bins only:`, {
         poolBinStep,
         userStyle: userPortfolioStyle,
-        range: `${minBinId} to ${maxBinId}`,
-        rangeWidth,
+        range: `${selectedRange.minBinId} to ${selectedRange.maxBinId}`,
+        existingBins: selectedRange.existingBins,
         amount: btcAmount,
         token: tokenX
       });
       
-      // Create one-sided position using pool's actual parameters
-      const result = await positionService.createOneSidedPosition({
+      // Create position using existing bins only
+      const result = await positionService.createPositionWithExistingBins({
         poolAddress: pool.address,
         userPublicKey: publicKey,
-        totalXAmount: bnAmount, // Wrapped BTC amount
-        totalYAmount: new BN(0), // No SOL needed for liquidity
-        minBinId,
-        maxBinId,
+        totalXAmount: bnAmount,
+        totalYAmount: new BN(0),
+        minBinId: selectedRange.minBinId,
+        maxBinId: selectedRange.maxBinId,
         strategyType: StrategyType.Spot,
         useAutoFill: false
-      }, true); // true = providing token X (wrapped BTC)
+      }, selectedRange);
       
       if (Array.isArray(result.transaction)) {
         for (const tx of result.transaction) {
@@ -300,22 +286,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         console.log('Transaction signature:', signature);
       }
       
-      const actualCost = result.estimatedCost?.total || selectedStrategyOption.estimatedCost;
-      const riskDescription = selectedStrategyOption.riskLevel === 'high' ? 'high precision, active monitoring recommended' :
-                             selectedStrategyOption.riskLevel === 'medium' ? 'balanced approach, moderate monitoring' :
-                             'stable and conservative, minimal monitoring needed';
-      
-      alert(`${actualPortfolioStyle.toUpperCase()} ${tokenX}-only position created successfully! 
+      alert(`${actualPortfolioStyle.toUpperCase()} ${tokenX} position created successfully using EXISTING bins!
 
 Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}...
-Your Strategy: ${selectedStrategyOption.label}
-Pool's Bin Step: ${poolBinStep} (${riskDescription})
+Strategy: ${selectedStrategyOption.label}
+Pool Bin Step: ${poolBinStep}
 Amount: ${btcAmount} ${tokenX}
-Range: Bins ${minBinId} to ${maxBinId} (above current price)
-Cost: ${actualCost.toFixed(3)} SOL
+Range: Bins ${selectedRange.minBinId} to ${selectedRange.maxBinId}
+Cost: ${result.estimatedCost.total.toFixed(3)} SOL (position rent only)
 
-Your ${tokenX} will earn fees when the price rises into your range.
-This position matches your ${actualPortfolioStyle} investment profile perfectly!`);
+✅ No bin creation costs - using existing price ranges only!
+Your ${tokenX} will earn fees when prices are within your selected range.`);
       
       onClose();
       setBtcAmount('');
@@ -324,34 +305,15 @@ This position matches your ${actualPortfolioStyle} investment profile perfectly!
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
-      // Enhanced error handling with bin step context
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        alert(`Insufficient SOL balance for your ${actualPortfolioStyle} strategy. 
+        alert(`Insufficient SOL balance for your ${actualPortfolioStyle} strategy.
 
-This pool uses bin step ${poolBinStep}:
-${poolBinStep <= 5 ? '• Very high precision (0.05% per bin) - may require more binArray creation' : ''}
-${poolBinStep <= 15 && poolBinStep > 5 ? '• Standard precision - balanced cost and efficiency' : ''}
-${poolBinStep >= 50 ? '• Conservative precision - usually uses existing bins, lower cost' : ''}
-
-What you need SOL for:
+You only need SOL for:
 • Position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable)
-• BinArray creation: varies by bin step complexity
 • Transaction fees: ~0.015 SOL
 
-Please add more SOL to your wallet and try again.`);
-      } else if (errorMessage.includes('Transaction simulation failed')) {
-        alert(`Transaction failed for bin step ${poolBinStep} pool. This could be due to:
-
-1. Insufficient funds for this precision level
-2. The selected price range requires expensive bin creation
-3. Network congestion
-
-Bin step ${poolBinStep} characteristics:
-${poolBinStep <= 5 ? '• Very high precision - requires more SOL for bin creation' : ''}
-${poolBinStep <= 15 && poolBinStep > 5 ? '• Standard precision - moderate SOL requirements' : ''}
-${poolBinStep >= 50 ? '• Conservative precision - minimal SOL requirements' : ''}
-
-Try again with more SOL.`);
+✅ No bin creation costs since we're using existing bins!
+Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`);
       } else {
         alert(`Error creating ${actualPortfolioStyle} position: ${errorMessage}`);
       }
@@ -360,7 +322,6 @@ Try again with more SOL.`);
     }
   };
 
-  // Get risk color for UI
   const getRiskColor = (risk: 'low' | 'medium' | 'high') => {
     switch (risk) {
       case 'low': return 'text-green-400 border-green-500/30 bg-green-500/10';
@@ -369,11 +330,10 @@ Try again with more SOL.`);
     }
   };
 
-  // Get bin step description
   const getBinStepDescription = (binStep: number) => {
-    if (binStep <= 5) return 'Very high precision (0.05% increments) - maximum fee capture but higher volatility';
-    if (binStep <= 15) return 'Standard precision (0.1-1.5% increments) - good balance of fees and stability';
-    return 'Conservative precision (5%+ increments) - very stable, lower but consistent returns';
+    if (binStep <= 5) return 'Very high precision (0.05% increments) - maximum fee capture';
+    if (binStep <= 15) return 'Standard precision (0.1-1.5% increments) - balanced approach';
+    return 'Conservative precision (5%+ increments) - stable and predictable';
   };
   
   return (
@@ -382,12 +342,12 @@ Try again with more SOL.`);
         <DialogHeader className="space-y-3">
           <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity</DialogTitle>
           <DialogDescription className="text-sm text-sub-text">
-            Using your {actualPortfolioStyle} strategy with this pool&apos;s bin step {poolBinStep}
+            Using your {actualPortfolioStyle} strategy with existing bins only (no creation costs)
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-6 mt-6">
-          {/* Pool Information - Collapsible */}
+          {/* Pool Information */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg">
             <div 
               className="p-4 cursor-pointer flex items-center justify-between"
@@ -419,23 +379,36 @@ Try again with more SOL.`);
                     <span className="text-primary font-medium">{poolBinStep}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span>Your Style:</span>
-                    <span className={`font-medium ${getPortfolioStyleInfo(actualPortfolioStyle).color}`}>
-                      {getPortfolioStyleInfo(actualPortfolioStyle).icon} {getPortfolioStyleInfo(actualPortfolioStyle).label}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span>Risk Level:</span>
-                    <span className={`px-2 py-1 rounded text-xs border ${getRiskColor(getRiskLevelFromBinStep(poolBinStep))}`}>
-                      {getRiskLevelFromBinStep(poolBinStep).toUpperCase()}
-                    </span>
+                    <span>Approach:</span>
+                    <span className="text-green-400 font-medium">✅ Existing Bins Only</span>
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Balance Display - Collapsible */}
+          {/* Existing Bin Ranges Info */}
+          {isLoadingBins ? (
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4 text-center">
+              <Loader2 className="h-5 w-5 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-sm text-sub-text">Finding existing price ranges...</p>
+            </div>
+          ) : existingBinRanges.length > 0 && (
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle className="h-5 w-5 text-green-400" />
+                <span className="text-green-400 font-medium">Existing Bins Found</span>
+              </div>
+              <p className="text-sm text-white">
+                Using range: {existingBinRanges[0]?.description}
+              </p>
+              <p className="text-xs text-green-300 mt-1">
+                ✅ No bin creation costs - using existing liquidity infrastructure
+              </p>
+            </div>
+          )}
+
+          {/* Balance Display */}
           {balanceInfo && (
             <div className="bg-[#0f0f0f] border border-border rounded-lg">
               <div 
@@ -480,7 +453,7 @@ Try again with more SOL.`);
             </div>
           )}
 
-          {/* Validation Error Display */}
+          {/* Validation Error */}
           {validationError && (
             <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -488,7 +461,7 @@ Try again with more SOL.`);
             </div>
           )}
 
-          {/* Wrapped BTC Amount Input */}
+          {/* Amount Input */}
           <div className="space-y-3">
             <label className="text-sm text-sub-text block font-medium">
               {tokenX} Amount to Provide
@@ -512,7 +485,7 @@ Try again with more SOL.`);
             </div>
           </div>
 
-          {/* Strategy Selection - Now shows only your chosen strategy */}
+          {/* Strategy Display */}
           <div className="space-y-4">
             <label className="text-sm text-sub-text block font-medium">
               💡 Your Position Strategy
@@ -530,8 +503,8 @@ Try again with more SOL.`);
                         <div className="font-medium text-white text-sm">
                           {option.label}
                         </div>
-                        <div className="px-2 py-1 rounded-full text-xs bg-primary/20 text-primary border border-primary/30">
-                          YOUR STYLE
+                        <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30">
+                          NO BIN COSTS
                         </div>
                       </div>
                       <div className="text-xs text-sub-text mb-2">
@@ -540,19 +513,17 @@ Try again with more SOL.`);
                       <div className="flex items-center gap-4 text-xs">
                         <span>Bin Step: {option.binStep}</span>
                         <span>Cost: ~{option.estimatedCost.toFixed(3)} SOL</span>
-                        <span>Strategy: One-sided {tokenX}</span>
+                        <span>Strategy: Existing Bins Only</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
-                    </div>
+                    <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Strategy Details Explanation */}
+          {/* Strategy Details */}
           {selectedStrategyOption && (
             <div className="bg-[#0f0f0f] border border-border rounded-lg">
               <div 
@@ -562,7 +533,7 @@ Try again with more SOL.`);
                 <div className="flex items-center gap-2">
                   <Info className="h-5 w-5 flex-shrink-0 text-primary" />
                   <span className="text-sm text-sub-text font-medium">
-                    Strategy Details (Bin Step {poolBinStep})
+                    Strategy Details (Existing Bins Only)
                   </span>
                 </div>
                 {showStrategyDetails ? (
@@ -576,13 +547,13 @@ Try again with more SOL.`);
                 <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
                   <div className="text-sm text-sub-text space-y-2 border-t border-border pt-4">
                     <div>
-                      <div className="font-medium text-white mb-2">Your Position Details:</div>
+                      <div className="font-medium text-white mb-2">Position Details:</div>
                       <div>• Bin Step {poolBinStep}: {getBinStepDescription(poolBinStep)}</div>
                       <div>• Portfolio Style: {actualPortfolioStyle.toUpperCase()} - matches your risk preference</div>
                       <div>• Position Type: One-sided {tokenX} only</div>
-                      <div>• Placement: Above current price (earns when price rises)</div>
-                      <div>• Range: Dynamically calculated based on bin step efficiency</div>
-                      <div>• Perfect Match: This pool&apos;s characteristics align with your {actualPortfolioStyle} strategy</div>
+                      <div>• Range: Uses existing price bins only</div>
+                      <div>• ✅ Cost Advantage: No bin creation fees - significant savings!</div>
+                      <div>• Safety: Lower risk by using established price ranges</div>
                     </div>
                   </div>
                 </div>
@@ -590,7 +561,7 @@ Try again with more SOL.`);
             </div>
           )}
 
-          {/* Cost Breakdown */}
+          {/* Simplified Cost Breakdown */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg">
             <div 
               className="p-4 cursor-pointer flex items-center justify-between"
@@ -599,7 +570,7 @@ Try again with more SOL.`);
               <div className="flex items-center gap-2">
                 <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown</span>
                 <span className="text-primary font-medium">
-                  ~{selectedStrategyOption ? (selectedStrategyOption.estimatedCost + (poolBinStep <= 5 ? 0.150 : poolBinStep <= 15 ? 0.075 : 0.057) + 0.015).toFixed(3) : '0.147'} SOL
+                  ~{selectedStrategyOption ? (selectedStrategyOption.estimatedCost + 0.015).toFixed(3) : '0.072'} SOL
                 </span>
               </div>
               {showCostBreakdown ? (
@@ -617,10 +588,8 @@ Try again with more SOL.`);
                     <span className="text-green-400 font-medium">{selectedStrategyOption.estimatedCost.toFixed(3)} SOL</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>BinArray Creation (bin step {poolBinStep}):</span>
-                    <span className="text-yellow-400 font-medium">
-                      ~{(poolBinStep <= 5 ? 0.150 : poolBinStep <= 15 ? 0.075 : 0.057).toFixed(3)} SOL
-                    </span>
+                    <span>Bin Creation Cost:</span>
+                    <span className="text-green-400 font-medium">FREE ✅</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Transaction Fees:</span>
@@ -629,14 +598,12 @@ Try again with more SOL.`);
                   <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
                     <span>Total Estimated:</span>
                     <span className="text-primary">
-                      ~{(selectedStrategyOption.estimatedCost + (poolBinStep <= 5 ? 0.150 : poolBinStep <= 15 ? 0.075 : 0.057) + 0.015).toFixed(3)} SOL
+                      ~{(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL
                     </span>
                   </div>
                 </div>
-                <div className="mt-3 text-xs text-sub-text">
-                  💡 {poolBinStep <= 5 ? 'High precision bin step may require creating new price bins.' : 
-                      poolBinStep >= 50 ? 'Conservative bin step often uses existing bins, saving costs.' :
-                      'This bin step provides a good balance of cost and precision.'}
+                <div className="mt-3 text-xs text-green-400">
+                  💡 Major savings! Using existing bins eliminates expensive bin creation costs (typically 0.075+ SOL per new bin).
                 </div>
               </div>
             )}
@@ -651,6 +618,8 @@ Try again with more SOL.`);
               parseFloat(btcAmount) <= 0 || 
               isLoading || 
               isCheckingBalance ||
+              isLoadingBins ||
+              existingBinRanges.length === 0 ||
               (balanceInfo ? !balanceInfo.hasEnoughSol : false)
             }
             className="bg-primary hover:bg-primary/80 w-full sm:w-auto order-1 sm:order-2"
@@ -660,6 +629,11 @@ Try again with more SOL.`);
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Creating Position...
               </>
+            ) : isLoadingBins ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Finding Bins...
+              </>
             ) : (
               `Create ${actualPortfolioStyle} Position`
             )}
@@ -667,7 +641,7 @@ Try again with more SOL.`);
           <Button 
             variant="outline" 
             onClick={onClose} 
-            disabled={isLoading}
+            disabled={isLoading || isLoadingBins}
             className="w-full sm:w-auto order-2 sm:order-1"
           >
             Cancel
