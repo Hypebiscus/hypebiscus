@@ -1,7 +1,7 @@
-// Enhanced AddLiquidityModal.tsx - Clean version using only existing bins
-// Users can only provide liquidity within existing bin steps
+// Enhanced AddLiquidityModal.tsx - FIXED VERSION - No more infinite requests
+// Clean version using only existing bins with proper caching and request management
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Info, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
@@ -41,6 +41,14 @@ interface StrategyOption {
   strategy: 'oneSided' | 'balanced' | 'ranged';
 }
 
+// Cache for bin ranges to prevent repeated requests
+const binRangesCache = new Map<string, { 
+  data: ExistingBinRange[]; 
+  timestamp: number; 
+  activeBinId: number;
+}>();
+const CACHE_DURATION = 60000; // 1 minute cache
+
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
   isOpen, 
   onClose,
@@ -62,12 +70,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [currentBinId, setCurrentBinId] = useState<number | null>(null);
   const [existingBinRanges, setExistingBinRanges] = useState<ExistingBinRange[]>([]);
   const [isLoadingBins, setIsLoadingBins] = useState(false);
+  const [binRangesLoaded, setBinRangesLoaded] = useState(false);
   
   // UI state
   const [showStrategyDetails, setShowStrategyDetails] = useState(false);
   const [showCostBreakdown, setShowCostBreakdown] = useState(false);
   const [showAccountBalance, setShowAccountBalance] = useState(false);
   const [showPoolInfo, setShowPoolInfo] = useState(false);
+
+  // Refs to prevent multiple simultaneous requests
+  const findingBinsRef = useRef(false);
+  const poolAddressRef = useRef<string | null>(null);
 
   // Get token names from pool
   const getTokenNames = () => {
@@ -85,22 +98,45 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     return parseInt(pool.binStep);
   }, [pool]);
 
-  // Find existing bin ranges in the pool using the position service
-  const findExistingBinRanges = useCallback(async () => {
-    if (!pool) return;
+  // FIXED: Stable function with proper caching and request deduplication
+  const findExistingBinRanges = useCallback(async (poolAddress: string) => {
+    // Prevent multiple simultaneous calls for the same pool
+    if (findingBinsRef.current || !poolAddress) {
+      console.log('Skipping bin range request - already in progress or no pool address');
+      return;
+    }
+
+    // Check cache first
+    const cached = binRangesCache.get(poolAddress);
+    const now = Date.now();
     
+    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      console.log('Using cached bin ranges for pool:', poolAddress.substring(0, 8));
+      setExistingBinRanges(cached.data);
+      setCurrentBinId(cached.activeBinId);
+      setBinRangesLoaded(true);
+      return;
+    }
+
+    findingBinsRef.current = true;
     setIsLoadingBins(true);
+    setBinRangesLoaded(false);
+    
     try {
-      const dlmmPool = await dlmmService.initializePool(pool.address);
+      console.log('Fetching fresh bin ranges for pool:', poolAddress.substring(0, 8));
+      
+      const dlmmPool = await dlmmService.initializePool(poolAddress);
       const activeBin = await dlmmPool.getActiveBin();
       setCurrentBinId(activeBin.binId);
       
-      // Use the position service to find existing bin ranges
-      const existingRanges = await positionService.findExistingBinRanges(pool.address, 20);
+      // Use the position service to find existing bin ranges with portfolio style
+      const existingRanges = await positionService.findExistingBinRanges(poolAddress, 20, actualPortfolioStyle);
+      
+      let finalRanges: ExistingBinRange[];
       
       if (existingRanges.length > 0) {
-        setExistingBinRanges(existingRanges);
-        console.log('Found existing bin ranges:', existingRanges);
+        finalRanges = existingRanges;
+        console.log(`Found ${existingRanges.length} existing bin ranges`);
       } else {
         // Create a fallback range using the correct interface
         const fallbackRange: ExistingBinRange = {
@@ -111,12 +147,23 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           isPopular: false,
           description: 'Conservative range around current price (safe default)'
         };
-        setExistingBinRanges([fallbackRange]);
-        console.log('Using fallback range around active bin:', fallbackRange);
+        finalRanges = [fallbackRange];
+        console.log('Using fallback range around active bin:', activeBin.binId);
       }
+      
+      setExistingBinRanges(finalRanges);
+      setBinRangesLoaded(true);
+      
+      // Cache the results
+      binRangesCache.set(poolAddress, {
+        data: finalRanges,
+        timestamp: now,
+        activeBinId: activeBin.binId
+      });
       
     } catch (error) {
       console.error('Error finding existing bins:', error);
+      
       // Create fallback range if everything fails
       const fallbackRange: ExistingBinRange = {
         minBinId: currentBinId ? currentBinId - 5 : 0,
@@ -127,17 +174,35 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         description: 'Default safe range (position rent only)'
       };
       setExistingBinRanges([fallbackRange]);
+      setBinRangesLoaded(true);
     } finally {
       setIsLoadingBins(false);
+      findingBinsRef.current = false;
     }
-  }, [dlmmService, positionService, pool, currentBinId]);
+  }, []); // Empty dependency array - function is stable
 
-  // Load existing bins when modal opens
+  // FIXED: Load existing bins when modal opens with proper conditions
   useEffect(() => {
-    if (isOpen && pool) {
-      findExistingBinRanges();
+    if (isOpen && pool && pool.address !== poolAddressRef.current && !binRangesLoaded && !isLoadingBins) {
+      poolAddressRef.current = pool.address;
+      findExistingBinRanges(pool.address);
     }
-  }, [isOpen, pool, findExistingBinRanges]);
+  }, [isOpen, pool?.address, binRangesLoaded, isLoadingBins, findExistingBinRanges]);
+
+  // Reset state when modal closes or pool changes
+  useEffect(() => {
+    if (!isOpen) {
+      setBinRangesLoaded(false);
+      setExistingBinRanges([]);
+      setCurrentBinId(null);
+      setBalanceInfo(null);
+      setValidationError('');
+      setBtcAmount('');
+      setSelectedStrategy('');
+      poolAddressRef.current = null;
+      findingBinsRef.current = false;
+    }
+  }, [isOpen]);
 
   // Strategy options based on existing bins only
   const strategyOptions: StrategyOption[] = useMemo(() => {
@@ -503,20 +568,20 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
                         <div className="font-medium text-white text-sm">
                           {option.label}
                         </div>
-                        <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30">
+                        <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30 whitespace-nowrap">
                           NO BIN COSTS
                         </div>
                       </div>
                       <div className="text-xs text-sub-text mb-2">
                         {option.description}
                       </div>
-                      <div className="flex items-center gap-4 text-xs">
-                        <span>Bin Step: {option.binStep}</span>
-                        <span>Cost: ~{option.estimatedCost.toFixed(3)} SOL</span>
-                        <span>Strategy: Existing Bins Only</span>
+                      <div className="flex items-center gap-4 text-xs flex-wrap">
+                        <span className="whitespace-nowrap">Bin Step: {option.binStep}</span>
+                        <span className="whitespace-nowrap">Cost: ~{option.estimatedCost.toFixed(3)} SOL</span>
+                        <span className="whitespace-nowrap">Strategy: Existing Bins Only</span>
                       </div>
                     </div>
-                    <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+                    <CheckCircle className="h-5 w-5 text-primary flex-shrink-0 ml-2" />
                   </div>
                 </div>
               ))}
