@@ -179,7 +179,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setIsLoadingBins(false);
       findingBinsRef.current = false;
     }
-  }, []); // Empty dependency array - function is stable
+  }, [actualPortfolioStyle, dlmmService, positionService]); // Empty dependency array - function is stable
 
   // FIXED: Load existing bins when modal opens with proper conditions
   useEffect(() => {
@@ -187,7 +187,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       poolAddressRef.current = pool.address;
       findExistingBinRanges(pool.address);
     }
-  }, [isOpen, pool?.address, binRangesLoaded, isLoadingBins, findExistingBinRanges]);
+  }, [isOpen, pool, binRangesLoaded, isLoadingBins, findExistingBinRanges]);
 
   // Reset state when modal closes or pool changes
   useEffect(() => {
@@ -310,7 +310,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     setIsLoading(true);
     
     try {
-      let decimals = 8; // Default for BTC tokens
+      const decimals = 8; // Default for BTC tokens
       const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
       
       // Use the first available existing range
@@ -387,13 +387,13 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
     }
   };
 
-  const getRiskColor = (risk: 'low' | 'medium' | 'high') => {
-    switch (risk) {
-      case 'low': return 'text-green-400 border-green-500/30 bg-green-500/10';
-      case 'medium': return 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10';
-      case 'high': return 'text-red-400 border-red-500/30 bg-red-500/10';
-    }
-  };
+  // const getRiskColor = (risk: 'low' | 'medium' | 'high') => {
+  //   switch (risk) {
+  //     case 'low': return 'text-green-400 border-green-500/30 bg-green-500/10';
+  //     case 'medium': return 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10';
+  //     case 'high': return 'text-red-400 border-red-500/30 bg-red-500/10';
+  //   }
+  // };
 
   const getBinStepDescription = (binStep: number) => {
     if (binStep <= 5) return 'Very high precision (0.05% increments) - maximum fee capture';

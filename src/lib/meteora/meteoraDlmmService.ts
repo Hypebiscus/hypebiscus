@@ -6,6 +6,19 @@ import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from '@solana/we
 import { BN } from '@coral-xyz/anchor';
 import { useWallet } from '@solana/wallet-adapter-react';
 
+// Add interface definitions for proper typing
+interface BinArray {
+  account?: {
+    index?: number;
+  };
+  [key: string]: unknown;
+}
+
+interface PoolBinArrays {
+  getBinArrays?(): Promise<BinArray[]>;
+  [key: string]: unknown;
+}
+
 // Enhanced error types
 export enum DLMMErrorType {
   INSUFFICIENT_SOL = 'INSUFFICIENT_SOL',
@@ -277,7 +290,7 @@ export class MeteoraDlmmService {
       
       try {
         // Try to get bin arrays to check which bins exist
-        const binArrays = await (typedPool as any).getBinArrays?.();
+        const binArrays = await (typedPool as unknown as PoolBinArrays).getBinArrays?.();
         
         if (binArrays && binArrays.length > 0) {
           // Check which bins in our range fall within existing bin arrays
@@ -285,7 +298,7 @@ export class MeteoraDlmmService {
             const binArrayIndex = Math.floor(binId / 70); // Approximate bins per array
             
             // Check if this bin array exists
-            const binArrayExists = binArrays.some((binArray: any) => 
+            const binArrayExists = binArrays.some((binArray: BinArray) => 
               binArray.account?.index === binArrayIndex
             );
             
