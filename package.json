@@ -38,9 +38,11 @@
     "ecpair": "^3.0.0",
     "lucide-react": "^0.506.0",
     "next": "15.3.1",
+    "next-themes": "^0.4.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.3",
+    "sonner": "^2.0.6",
     "swr": "^2.3.3",
     "tailwind-merge": "^3.2.0",
     "uint8array-tools": "^0.0.9"

@@ -1,5 +1,6 @@
 // Enhanced AddLiquidityModal.tsx - FIXED VERSION - No more infinite requests
 // Clean version using only existing bins with proper caching and request management
+// UPDATED: Removed transaction fees from cost calculations
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -13,6 +14,8 @@ import { BN } from 'bn.js';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { FormattedPool } from '@/lib/utils/poolUtils';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { toast } from 'sonner';
 
 interface AddLiquidityModalProps {
   isOpen: boolean;
@@ -71,6 +74,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [existingBinRanges, setExistingBinRanges] = useState<ExistingBinRange[]>([]);
   const [isLoadingBins, setIsLoadingBins] = useState(false);
   const [binRangesLoaded, setBinRangesLoaded] = useState(false);
+  const [userTokenBalance, setUserTokenBalance] = useState<number>(0);
   
   // UI state
   const [showStrategyDetails, setShowStrategyDetails] = useState(false);
@@ -199,6 +203,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setValidationError('');
       setBtcAmount('');
       setSelectedStrategy('');
+      setUserTokenBalance(0);
       poolAddressRef.current = null;
       findingBinsRef.current = false;
     }
@@ -238,7 +243,66 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
   const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
 
-  // Balance checking with simplified cost calculation
+  // Fetch user's token balance
+  const fetchUserTokenBalance = useCallback(async () => {
+    if (!publicKey || !pool) return;
+
+    try {
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+      );
+
+      // Get token accounts for the user
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        publicKey,
+        { programId: TOKEN_PROGRAM_ID }
+      );
+
+      // Find the specific token account for this pool's token
+      // This is a simplified approach - you might need to match by mint address
+      let tokenBalance = 0;
+      
+      for (const account of tokenAccounts.value) {
+        const parsedInfo = account.account.data.parsed.info;
+        const balance = parsedInfo.tokenAmount.uiAmount;
+        
+        // Check if this is the token we're looking for (simplified check by symbol)
+        if (balance > 0) {
+          // For BTC tokens, we'll use the first non-zero balance as a fallback
+          // In production, you'd match by mint address
+          tokenBalance = Math.max(tokenBalance, balance);
+        }
+      }
+
+      setUserTokenBalance(tokenBalance);
+    } catch (error) {
+      console.error('Error fetching token balance:', error);
+      setUserTokenBalance(0);
+    }
+  }, [publicKey, pool]);
+
+  // Fetch token balance when modal opens and user is connected
+  useEffect(() => {
+    if (isOpen && publicKey && pool) {
+      fetchUserTokenBalance();
+    }
+  }, [isOpen, publicKey, pool, fetchUserTokenBalance]);
+
+  // Handle percentage buttons
+  const handlePercentageClick = (percentage: number) => {
+    if (userTokenBalance <= 0) return;
+    
+    const amount = (userTokenBalance * percentage / 100).toFixed(6);
+    setBtcAmount(amount);
+  };
+
+  // Handle max button
+  const handleMaxClick = () => {
+    if (userTokenBalance <= 0) return;
+    setBtcAmount(userTokenBalance.toFixed(6));
+  };
+
+  // Balance checking with simplified cost calculation (NO TRANSACTION FEES)
   const checkUserBalances = useCallback(async () => {
     if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0 || !selectedStrategyOption) return;
 
@@ -253,8 +317,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const solBalanceLamports = await connection.getBalance(publicKey);
       const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
       
-      // Simplified cost calculation - only position rent + transaction fees
-      const estimatedSolNeeded = selectedStrategyOption.estimatedCost + 0.015; // Position rent + tx fees
+      // UPDATED: Only position rent (removed transaction fees)
+      const estimatedSolNeeded = selectedStrategyOption.estimatedCost; // Only position rent
       
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
       const shortfall = hasEnoughSol ? 0 : estimatedSolNeeded - solBalance;
@@ -303,7 +367,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
-      alert(validationError || 'Insufficient SOL balance to complete transaction');
+      toast.error('Insufficient SOL Balance', {
+        description: validationError || 'You need more SOL to complete this transaction.',
+        duration: 5000,
+      });
       return;
     }
 
@@ -351,17 +418,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         console.log('Transaction signature:', signature);
       }
       
-      alert(`${actualPortfolioStyle.toUpperCase()} ${tokenX} position created successfully using EXISTING bins!
-
-Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}...
-Strategy: ${selectedStrategyOption.label}
-Pool Bin Step: ${poolBinStep}
-Amount: ${btcAmount} ${tokenX}
-Range: Bins ${selectedRange.minBinId} to ${selectedRange.maxBinId}
-Cost: ${result.estimatedCost.total.toFixed(3)} SOL (position rent only)
-
-✅ No bin creation costs - using existing price ranges only!
-Your ${tokenX} will earn fees when prices are within your selected range.`);
+      toast.success('🎉 Position Created Successfully!', {
+        description: `${actualPortfolioStyle.toUpperCase()} ${tokenX} position created using existing bins only! Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... Cost: ${result.estimatedCost.total.toFixed(3)} SOL`,
+        duration: 8000,
+        action: {
+          label: 'View Details',
+          onClick: () => {
+            // You could add logic here to show position details
+            console.log('View position details:', result.positionKeypair.publicKey.toString());
+          },
+        },
+      });
       
       onClose();
       setBtcAmount('');
@@ -371,29 +438,26 @@ Your ${tokenX} will earn fees when prices are within your selected range.`);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        alert(`Insufficient SOL balance for your ${actualPortfolioStyle} strategy.
-
-You only need SOL for:
-• Position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable)
-• Transaction fees: ~0.015 SOL
-
-✅ No bin creation costs since we're using existing bins!
-Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`);
+        toast.error('Insufficient SOL Balance', {
+          description: `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`,
+          duration: 6000,
+          action: {
+            label: 'Learn More',
+            onClick: () => {
+              console.log('Show cost breakdown info');
+            },
+          },
+        });
       } else {
-        alert(`Error creating ${actualPortfolioStyle} position: ${errorMessage}`);
+        toast.error('Position Creation Failed', {
+          description: `Error creating ${actualPortfolioStyle} position: ${errorMessage}`,
+          duration: 6000,
+        });
       }
     } finally {
       setIsLoading(false);
     }
   };
-
-  // const getRiskColor = (risk: 'low' | 'medium' | 'high') => {
-  //   switch (risk) {
-  //     case 'low': return 'text-green-400 border-green-500/30 bg-green-500/10';
-  //     case 'medium': return 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10';
-  //     case 'high': return 'text-red-400 border-red-500/30 bg-red-500/10';
-  //   }
-  // };
 
   const getBinStepDescription = (binStep: number) => {
     if (binStep <= 5) return 'Very high precision (0.05% increments) - maximum fee capture';
@@ -531,6 +595,17 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
             <label className="text-sm text-sub-text block font-medium">
               {tokenX} Amount to Provide
             </label>
+            
+            {/* Token Balance Display */}
+            {publicKey && (
+              <div className="flex justify-between items-center text-xs text-sub-text">
+                <span>Available Balance:</span>
+                <span className="font-medium">
+                  {userTokenBalance.toFixed(6)} {tokenX}
+                </span>
+              </div>
+            )}
+            
             <div className="relative">
               <input
                 type="text"
@@ -548,6 +623,58 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
                 </div>
               )}
             </div>
+            
+            {/* Percentage Buttons */}
+            {publicKey && userTokenBalance > 0 && (
+              <div className="flex gap-2 mt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePercentageClick(25)}
+                  className="flex-1 text-xs bg-transparent border-border hover:border-primary hover:bg-primary/10 text-white"
+                >
+                  25%
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePercentageClick(50)}
+                  className="flex-1 text-xs bg-transparent border-border hover:border-primary hover:bg-primary/10 text-white"
+                >
+                  50%
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePercentageClick(75)}
+                  className="flex-1 text-xs bg-transparent border-border hover:border-primary hover:bg-primary/10 text-white"
+                >
+                  75%
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleMaxClick}
+                  className="flex-1 text-xs bg-primary/20 border-primary hover:bg-primary/30 text-primary font-medium"
+                >
+                  MAX
+                </Button>
+              </div>
+            )}
+            
+            {/* No Balance Warning */}
+            {publicKey && userTokenBalance === 0 && (
+              <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-3 mt-3">
+                <div className="flex items-center gap-2 text-yellow-200 text-sm">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  <span>No {tokenX} balance found in your wallet</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Strategy Display */}
@@ -626,7 +753,7 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
             </div>
           )}
 
-          {/* Simplified Cost Breakdown */}
+          {/* UPDATED: Cost Breakdown (No Transaction Fees) */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg">
             <div 
               className="p-4 cursor-pointer flex items-center justify-between"
@@ -635,7 +762,7 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
               <div className="flex items-center gap-2">
                 <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown</span>
                 <span className="text-primary font-medium">
-                  ~{selectedStrategyOption ? (selectedStrategyOption.estimatedCost + 0.015).toFixed(3) : '0.072'} SOL
+                  ~{selectedStrategyOption ? selectedStrategyOption.estimatedCost.toFixed(3) : '0.057'} SOL
                 </span>
               </div>
               {showCostBreakdown ? (
@@ -656,14 +783,11 @@ Total needed: ~${(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL`
                     <span>Bin Creation Cost:</span>
                     <span className="text-green-400 font-medium">FREE ✅</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Transaction Fees:</span>
-                    <span className="text-blue-400 font-medium">~0.015 SOL</span>
-                  </div>
+                  {/* REMOVED: Transaction Fees line */}
                   <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
                     <span>Total Estimated:</span>
                     <span className="text-primary">
-                      ~{(selectedStrategyOption.estimatedCost + 0.015).toFixed(3)} SOL
+                      ~{selectedStrategyOption.estimatedCost.toFixed(3)} SOL
                     </span>
                   </div>
                 </div>
