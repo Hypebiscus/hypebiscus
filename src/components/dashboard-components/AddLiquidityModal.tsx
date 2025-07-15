@@ -1,7 +1,3 @@
-// Enhanced AddLiquidityModal.tsx - FIXED VERSION - No more infinite requests
-// Clean version using only existing bins with proper caching and request management
-// UPDATED: Removed transaction fees from cost calculations
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -51,6 +47,67 @@ const binRangesCache = new Map<string, {
   activeBinId: number;
 }>();
 const CACHE_DURATION = 60000; // 1 minute cache
+
+// FIXED: Custom toast function with better mobile positioning and z-index
+const showCustomToast = {
+  success: (title: string, description: string, options?: any) => {
+    toast.success(title, {
+      description,
+      style: {
+        backgroundColor: '#1BE3C2',
+        color: '#000000',
+        border: '1px solid #1BE3C2',
+        borderRadius: '12px',
+        fontSize: '14px',
+        fontFamily: 'var(--font-sans)',
+        boxShadow: '0 8px 32px rgba(27, 227, 194, 0.3)',
+        zIndex: 9999,
+        position: 'fixed',
+      },
+      className: 'custom-success-toast',
+      position: 'top-center',
+      ...options,
+    });
+  },
+  error: (title: string, description: string, options?: any) => {
+    toast.error(title, {
+      description,
+      style: {
+        backgroundColor: '#FF4040',
+        color: '#FFFFFF',
+        border: '1px solid #FF4040',
+        borderRadius: '12px',
+        fontSize: '14px',
+        fontFamily: 'var(--font-sans)',
+        boxShadow: '0 8px 32px rgba(255, 64, 64, 0.3)',
+        zIndex: 9999,
+        position: 'fixed',
+      },
+      className: 'custom-error-toast',
+      position: 'top-center',
+      ...options,
+    });
+  },
+  warning: (title: string, description: string, options?: any) => {
+    toast.warning(title, {
+      description,
+      style: {
+        backgroundColor: '#EFB54B',
+        color: '#000000',
+        border: '1px solid #EFB54B',
+        borderRadius: '12px',
+        fontSize: '14px',
+        fontFamily: 'var(--font-sans)',
+        boxShadow: '0 8px 32px rgba(239, 181, 75, 0.3)',
+        zIndex: 9999,
+        position: 'fixed',
+      },
+      className: 'custom-warning-toast',
+      position: 'top-center',
+      ...options,
+    });
+  },
+};
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
   isOpen, 
@@ -288,18 +345,40 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen, publicKey, pool, fetchUserTokenBalance]);
 
-  // Handle percentage buttons
+  // FIXED: Handle percentage buttons with better debugging
   const handlePercentageClick = (percentage: number) => {
-    if (userTokenBalance <= 0) return;
+    console.log('Percentage clicked:', percentage, 'User balance:', userTokenBalance);
+    
+    if (userTokenBalance <= 0) {
+      console.log('No token balance available');
+      showCustomToast.warning('No Balance', 'You don\'t have any tokens to allocate.');
+      return;
+    }
     
     const amount = (userTokenBalance * percentage / 100).toFixed(6);
+    console.log('Calculated amount:', amount);
     setBtcAmount(amount);
+    
+    // Show feedback toast
+    showCustomToast.success('Amount Updated', `Set to ${percentage}% of your balance: ${amount} ${tokenX}`);
   };
 
-  // Handle max button
+  // FIXED: Handle max button with better feedback
   const handleMaxClick = () => {
-    if (userTokenBalance <= 0) return;
-    setBtcAmount(userTokenBalance.toFixed(6));
+    console.log('Max clicked, User balance:', userTokenBalance);
+    
+    if (userTokenBalance <= 0) {
+      console.log('No token balance available for MAX');
+      showCustomToast.warning('No Balance', 'You don\'t have any tokens to allocate.');
+      return;
+    }
+    
+    const amount = userTokenBalance.toFixed(6);
+    console.log('Setting max amount:', amount);
+    setBtcAmount(amount);
+    
+    // Show feedback toast
+    showCustomToast.success('Amount Updated', `Set to maximum: ${amount} ${tokenX}`);
   };
 
   // Balance checking with simplified cost calculation (NO TRANSACTION FEES)
@@ -367,10 +446,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
-      toast.error('Insufficient SOL Balance', {
-        description: validationError || 'You need more SOL to complete this transaction.',
-        duration: 5000,
-      });
+      showCustomToast.error('Insufficient SOL Balance', 
+        validationError || 'You need more SOL to complete this transaction.',
+        { duration: 5000 }
+      );
       return;
     }
 
@@ -418,17 +497,18 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         console.log('Transaction signature:', signature);
       }
       
-      toast.success('🎉 Position Created Successfully!', {
-        description: `${actualPortfolioStyle.toUpperCase()} ${tokenX} position created using existing bins only! Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... Cost: ${result.estimatedCost.total.toFixed(3)} SOL`,
-        duration: 8000,
-        action: {
-          label: 'View Details',
-          onClick: () => {
-            // You could add logic here to show position details
-            console.log('View position details:', result.positionKeypair.publicKey.toString());
+      showCustomToast.success('🎉 Position Created Successfully!', 
+        `${actualPortfolioStyle.toUpperCase()} ${tokenX} position created using existing bins only! Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... Cost: ${result.estimatedCost.total.toFixed(3)} SOL`,
+        {
+          duration: 8000,
+          action: {
+            label: 'View Details',
+            onClick: () => {
+              console.log('View position details:', result.positionKeypair.publicKey.toString());
+            },
           },
-        },
-      });
+        }
+      );
       
       onClose();
       setBtcAmount('');
@@ -438,21 +518,23 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        toast.error('Insufficient SOL Balance', {
-          description: `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`,
-          duration: 6000,
-          action: {
-            label: 'Learn More',
-            onClick: () => {
-              console.log('Show cost breakdown info');
+        showCustomToast.error('Insufficient SOL Balance', 
+          `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`,
+          {
+            duration: 6000,
+            action: {
+              label: 'Learn More',
+              onClick: () => {
+                console.log('Show cost breakdown info');
+              },
             },
-          },
-        });
+          }
+        );
       } else {
-        toast.error('Position Creation Failed', {
-          description: `Error creating ${actualPortfolioStyle} position: ${errorMessage}`,
-          duration: 6000,
-        });
+        showCustomToast.error('Position Creation Failed', 
+          `Error creating ${actualPortfolioStyle} position: ${errorMessage}`,
+          { duration: 6000 }
+        );
       }
     } finally {
       setIsLoading(false);
@@ -783,7 +865,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     <span>Bin Creation Cost:</span>
                     <span className="text-green-400 font-medium">FREE ✅</span>
                   </div>
-                  {/* REMOVED: Transaction Fees line */}
                   <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
                     <span>Total Estimated:</span>
                     <span className="text-primary">
