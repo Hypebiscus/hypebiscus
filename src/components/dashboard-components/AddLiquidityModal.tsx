@@ -48,38 +48,76 @@ const binRangesCache = new Map<string, {
 }>();
 const CACHE_DURATION = 60000; // 1 minute cache
 
-// FIXED: Custom toast function with better mobile positioning and z-index
+// Toast management to prevent overlapping
+let lastToastId: string | number | null = null;
+let toastTimeout: NodeJS.Timeout | null = null;
+
+// FIXED: Custom toast function with deduplication and better timing
 const showCustomToast = {
   success: (title: string, description: string, options?: any) => {
-    toast.success(title, {
-      description,
-      style: {
-        backgroundColor: '#1BE3C2',
-        color: '#000000',
-        border: '1px solid #1BE3C2',
-        borderRadius: '12px',
-        fontSize: '14px',
-        fontFamily: 'var(--font-sans)',
-        boxShadow: '0 8px 32px rgba(27, 227, 194, 0.3)',
-        zIndex: 9999,
-        position: 'fixed',
-      },
-      className: 'custom-success-toast',
-      position: 'top-center',
-      ...options,
-    });
+    // For important success messages (like transaction success), don't debounce
+    const isImportantSuccess = title.includes('Position Created') || title.includes('Successfully');
+    
+    if (!isImportantSuccess) {
+      // Only dismiss previous toast for rapid percentage updates
+      if (lastToastId) {
+        toast.dismiss(lastToastId);
+      }
+      
+      // Clear any pending toast timeout
+      if (toastTimeout) {
+        clearTimeout(toastTimeout);
+      }
+    }
+    
+    // Small delay to prevent rapid-fire toasts (except for important success)
+    const delay = isImportantSuccess ? 0 : 100;
+    const duration = isImportantSuccess ? 8000 : 2000;
+    
+    const showToast = () => {
+      lastToastId = toast.success(title, {
+        description,
+        duration,
+        style: {
+          backgroundColor: '#22c55e', // Green color matching your image
+          color: '#ffffff',
+          border: '1px solid #16a34a',
+          borderRadius: '12px',
+          fontSize: '14px',
+          fontFamily: 'var(--font-sans)',
+          boxShadow: '0 8px 32px rgba(34, 197, 94, 0.3)',
+          zIndex: 9999,
+          position: 'fixed',
+        },
+        className: 'custom-success-toast',
+        position: 'top-center',
+        ...options,
+      });
+    };
+    
+    if (delay > 0) {
+      toastTimeout = setTimeout(showToast, delay);
+    } else {
+      showToast();
+    }
   },
   error: (title: string, description: string, options?: any) => {
-    toast.error(title, {
+    // Always show error toasts immediately
+    if (lastToastId) {
+      toast.dismiss(lastToastId);
+    }
+    
+    lastToastId = toast.error(title, {
       description,
+      duration: 6000, // Longer duration for errors
       style: {
-        backgroundColor: '#FF4040',
-        color: '#FFFFFF',
-        border: '1px solid #FF4040',
+        backgroundColor: '#ef4444',
+        color: '#ffffff',
+        border: '1px solid #dc2626',
         borderRadius: '12px',
         fontSize: '14px',
         fontFamily: 'var(--font-sans)',
-        boxShadow: '0 8px 32px rgba(255, 64, 64, 0.3)',
+        boxShadow: '0 8px 32px rgba(239, 68, 68, 0.3)',
         zIndex: 9999,
         position: 'fixed',
       },
@@ -89,16 +127,22 @@ const showCustomToast = {
     });
   },
   warning: (title: string, description: string, options?: any) => {
-    toast.warning(title, {
+    // Always show warning toasts immediately
+    if (lastToastId) {
+      toast.dismiss(lastToastId);
+    }
+    
+    lastToastId = toast.warning(title, {
       description,
+      duration: 4000,
       style: {
-        backgroundColor: '#EFB54B',
-        color: '#000000',
-        border: '1px solid #EFB54B',
+        backgroundColor: '#f59e0b',
+        color: '#ffffff',
+        border: '1px solid #d97706',
         borderRadius: '12px',
         fontSize: '14px',
         fontFamily: 'var(--font-sans)',
-        boxShadow: '0 8px 32px rgba(239, 181, 75, 0.3)',
+        boxShadow: '0 8px 32px rgba(245, 158, 11, 0.3)',
         zIndex: 9999,
         position: 'fixed',
       },
@@ -240,7 +284,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setIsLoadingBins(false);
       findingBinsRef.current = false;
     }
-  }, [actualPortfolioStyle, dlmmService, positionService]); // Empty dependency array - function is stable
+  }, [actualPortfolioStyle, dlmmService, positionService]);
 
   // FIXED: Load existing bins when modal opens with proper conditions
   useEffect(() => {
@@ -261,8 +305,21 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setBtcAmount('');
       setSelectedStrategy('');
       setUserTokenBalance(0);
+      setActivePercentage(null); // Reset active percentage
+      setIsUpdatingAmount(false); // Reset update flag
       poolAddressRef.current = null;
       findingBinsRef.current = false;
+      
+      // Clear any pending toast timeouts
+      if (toastTimeout) {
+        clearTimeout(toastTimeout);
+        toastTimeout = null;
+      }
+      // Dismiss any active toasts
+      if (lastToastId) {
+        toast.dismiss(lastToastId);
+        lastToastId = null;
+      }
     }
   }, [isOpen]);
 
@@ -345,9 +402,19 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen, publicKey, pool, fetchUserTokenBalance]);
 
-  // FIXED: Handle percentage buttons with better debugging
-  const handlePercentageClick = (percentage: number) => {
+  // State to track which percentage button was last clicked
+  const [activePercentage, setActivePercentage] = useState<number | null>(null);
+  const [isUpdatingAmount, setIsUpdatingAmount] = useState(false); // Prevent rapid updates
+
+  // FIXED: Handle percentage buttons with debouncing to prevent rapid toast spam
+  const handlePercentageClick = useCallback((percentage: number) => {
     console.log('Percentage clicked:', percentage, 'User balance:', userTokenBalance);
+    
+    // Prevent rapid clicking
+    if (isUpdatingAmount) {
+      console.log('Update in progress, ignoring click');
+      return;
+    }
     
     if (userTokenBalance <= 0) {
       console.log('No token balance available');
@@ -355,17 +422,34 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       return;
     }
     
+    setIsUpdatingAmount(true);
+    
+    // Set active percentage for visual feedback
+    setActivePercentage(percentage);
+    
+    // FIXED: Calculate the correct percentage amount
     const amount = (userTokenBalance * percentage / 100).toFixed(6);
-    console.log('Calculated amount:', amount);
+    console.log(`Setting ${percentage}% of balance:`, amount);
     setBtcAmount(amount);
     
-    // Show feedback toast
+    // Show feedback toast with correct percentage (debounced)
     showCustomToast.success('Amount Updated', `Set to ${percentage}% of your balance: ${amount} ${tokenX}`);
-  };
+    
+    // Reset update flag after a short delay
+    setTimeout(() => {
+      setIsUpdatingAmount(false);
+    }, 300);
+  }, [userTokenBalance, tokenX, isUpdatingAmount]);
 
-  // FIXED: Handle max button with better feedback
-  const handleMaxClick = () => {
+  // FIXED: Handle max button with debouncing
+  const handleMaxClick = useCallback(() => {
     console.log('Max clicked, User balance:', userTokenBalance);
+    
+    // Prevent rapid clicking
+    if (isUpdatingAmount) {
+      console.log('Update in progress, ignoring click');
+      return;
+    }
     
     if (userTokenBalance <= 0) {
       console.log('No token balance available for MAX');
@@ -373,13 +457,23 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       return;
     }
     
+    setIsUpdatingAmount(true);
+    
+    // Set active percentage to 100 for MAX
+    setActivePercentage(100);
+    
     const amount = userTokenBalance.toFixed(6);
     console.log('Setting max amount:', amount);
     setBtcAmount(amount);
     
-    // Show feedback toast
+    // Show feedback toast (debounced)
     showCustomToast.success('Amount Updated', `Set to maximum: ${amount} ${tokenX}`);
-  };
+    
+    // Reset update flag after a short delay
+    setTimeout(() => {
+      setIsUpdatingAmount(false);
+    }, 300);
+  }, [userTokenBalance, tokenX, isUpdatingAmount]);
 
   // Balance checking with simplified cost calculation (NO TRANSACTION FEES)
   const checkUserBalances = useCallback(async () => {
@@ -483,56 +577,147 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         useAutoFill: false
       }, selectedRange);
       
+      // Send transactions
+      console.log('About to send transaction(s)...');
+      let transactionSignatures: string[] = [];
+      
       if (Array.isArray(result.transaction)) {
-        for (const tx of result.transaction) {
+        console.log(`Sending ${result.transaction.length} transactions...`);
+        for (let i = 0; i < result.transaction.length; i++) {
+          const tx = result.transaction[i];
+          console.log(`Sending transaction ${i + 1}/${result.transaction.length}...`);
           const signature = await sendTransaction(tx, dlmmService.connection, {
             signers: [result.positionKeypair]
           });
-          console.log('Transaction signature:', signature);
+          console.log(`Transaction ${i + 1} signature:`, signature);
+          transactionSignatures.push(signature);
         }
       } else {
+        console.log('Sending single transaction...');
         const signature = await sendTransaction(result.transaction, dlmmService.connection, {
           signers: [result.positionKeypair]
         });
         console.log('Transaction signature:', signature);
+        transactionSignatures.push(signature);
       }
       
-      showCustomToast.success('🎉 Position Created Successfully!', 
-        `${actualPortfolioStyle.toUpperCase()} ${tokenX} position created using existing bins only! Position ID: ${result.positionKeypair.publicKey.toString().slice(0, 8)}... Cost: ${result.estimatedCost.total.toFixed(3)} SOL`,
-        {
-          duration: 8000,
-          action: {
-            label: 'View Details',
-            onClick: () => {
-              console.log('View position details:', result.positionKeypair.publicKey.toString());
-            },
-          },
-        }
-      );
+      console.log('All transactions completed successfully!');
+      console.log('Total signatures:', transactionSignatures);
       
-      onClose();
-      setBtcAmount('');
+      // IMPORTANT: Add a small delay to ensure transaction is confirmed before showing success
+      setTimeout(() => {
+        console.log('Showing success toast...');
+        
+        // Create custom toast with button at bottom
+        const toastId = toast.custom(
+          (t) => (
+            <div className="bg-[#22c55e] text-white border border-[#16a34a] rounded-xl p-4 shadow-2xl max-w-md w-full">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 mt-0.5">
+                  <div className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-lg mb-1">🎉 Position Created Successfully!</div>
+                  <div className="text-sm text-white/90 mb-3">
+                    {actualPortfolioStyle.toUpperCase()} {tokenX} position created successfully!
+                    <br />
+                    <span className="font-mono text-xs bg-white/10 px-2 py-1 rounded mt-1 inline-block">
+                      TX: {transactionSignatures[0].slice(0, 12)}...
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      window.open(`https://solscan.io/tx/${transactionSignatures[0]}`, '_blank');
+                    }}
+                    className="w-full bg-white/20 hover:bg-white/30 border border-white/30 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Check Transaction on Solscan
+                  </button>
+                </div>
+                <button
+                  onClick={() => toast.dismiss(String(t))}
+                  className="flex-shrink-0 text-white/60 hover:text-white transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ),
+          {
+            duration: 20000, // 20 seconds as requested
+            position: 'top-center',
+            style: {
+              background: 'transparent',
+              border: 'none',
+              boxShadow: 'none',
+            }
+          }
+        );
+        
+        // Store the toast ID for potential cleanup
+        lastToastId = toastId;
+      }, 800); // 800ms delay to ensure transaction is processed
+      
+      // Close modal and reset form after a longer delay to let user see the toast
+      setTimeout(() => {
+        console.log('Closing modal...');
+        onClose();
+        setBtcAmount('');
+        setActivePercentage(null);
+      }, 2500); // Keep 2.5 seconds so user can see toast before modal closes
       
     } catch (error) {
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
+      console.log('Error type detection:', {
+        errorMessage,
+        isInsufficientFunds: errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports'),
+        isUserRejected: errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied'),
+        isSimulationFailed: errorMessage.includes('Transaction simulation failed'),
+        isNetworkError: errorMessage.includes('Network') || errorMessage.includes('network')
+      });
+      
+      // Error handling with specific error toasts
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
+        console.log('Showing insufficient funds toast...');
         showCustomToast.error('Insufficient SOL Balance', 
           `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`,
-          {
-            duration: 6000,
-            action: {
-              label: 'Learn More',
-              onClick: () => {
-                console.log('Show cost breakdown info');
-              },
-            },
-          }
+          { duration: 6000 }
+        );
+      } else if (errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied') || errorMessage.includes('cancelled')) {
+        // User cancelled the transaction
+        console.log('Showing transaction cancelled toast...');
+        showCustomToast.warning('Transaction Cancelled', 
+          'You cancelled the transaction. Your funds are safe.',
+          { duration: 4000 }
+        );
+      } else if (errorMessage.includes('Transaction simulation failed')) {
+        console.log('Showing simulation failed toast...');
+        showCustomToast.error('Transaction Failed', 
+          'Transaction simulation failed. The selected bin range might be full or restricted.',
+          { duration: 6000 }
+        );
+      } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
+        console.log('Showing network error toast...');
+        showCustomToast.error('Network Error', 
+          'Network connection issue. Please check your connection and try again.',
+          { duration: 5000 }
         );
       } else {
+        // Generic error toast
+        console.log('Showing generic error toast...');
         showCustomToast.error('Position Creation Failed', 
-          `Error creating ${actualPortfolioStyle} position: ${errorMessage}`,
+          `Failed to create ${actualPortfolioStyle} position: ${errorMessage}`,
           { duration: 6000 }
         );
       }
@@ -714,7 +899,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={() => handlePercentageClick(25)}
-                  className="flex-1 text-xs bg-transparent border-border hover:border-primary hover:bg-primary/10 text-white"
+                  disabled={isUpdatingAmount}
+                  className={`flex-1 text-xs transition-all duration-200 ${
+                    activePercentage === 25
+                      ? 'bg-primary/20 border-primary text-primary font-medium'
+                      : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
+                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   25%
                 </Button>
@@ -723,7 +913,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={() => handlePercentageClick(50)}
-                  className="flex-1 text-xs bg-transparent border-border hover:border-primary hover:bg-primary/10 text-white"
+                  disabled={isUpdatingAmount}
+                  className={`flex-1 text-xs transition-all duration-200 ${
+                    activePercentage === 50
+                      ? 'bg-primary/20 border-primary text-primary font-medium'
+                      : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
+                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   50%
                 </Button>
@@ -732,7 +927,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={() => handlePercentageClick(75)}
-                  className="flex-1 text-xs bg-transparent border-border hover:border-primary hover:bg-primary/10 text-white"
+                  disabled={isUpdatingAmount}
+                  className={`flex-1 text-xs transition-all duration-200 ${
+                    activePercentage === 75
+                      ? 'bg-primary/20 border-primary text-primary font-medium'
+                      : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
+                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   75%
                 </Button>
@@ -741,7 +941,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={handleMaxClick}
-                  className="flex-1 text-xs bg-primary/20 border-primary hover:bg-primary/30 text-primary font-medium"
+                  disabled={isUpdatingAmount}
+                  className={`flex-1 text-xs transition-all duration-200 ${
+                    activePercentage === 100
+                      ? 'bg-primary/20 border-primary text-primary font-medium'
+                      : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
+                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   MAX
                 </Button>
