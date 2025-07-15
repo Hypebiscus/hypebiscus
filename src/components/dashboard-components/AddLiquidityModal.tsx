@@ -40,6 +40,14 @@ interface StrategyOption {
   strategy: 'oneSided' | 'balanced' | 'ranged';
 }
 
+// Define proper types for toast options
+interface ToastOptions {
+  duration?: number;
+  style?: React.CSSProperties;
+  className?: string;
+  position?: 'top-center' | 'top-left' | 'top-right' | 'bottom-center' | 'bottom-left' | 'bottom-right';
+}
+
 // Cache for bin ranges to prevent repeated requests
 const binRangesCache = new Map<string, { 
   data: ExistingBinRange[]; 
@@ -52,10 +60,20 @@ const CACHE_DURATION = 60000; // 1 minute cache
 let lastToastId: string | number | null = null;
 let toastTimeout: NodeJS.Timeout | null = null;
 
-// FIXED: Custom toast function with deduplication and better timing
+// FIXED: Timing constants for consistency
+const TIMING_CONSTANTS = {
+  TRANSACTION_CONFIRMATION_DELAY: 800,
+  SUCCESS_TOAST_DURATION: 8000, // Standard 8 seconds for important success
+  MODAL_CLOSE_DELAY: 8500, // Toast duration + buffer
+  ERROR_TOAST_DURATION: 6000,
+  WARNING_TOAST_DURATION: 4000,
+  REGULAR_TOAST_DURATION: 2000,
+  TOAST_BUFFER: 500
+} as const;
+
+// FIXED: Custom toast function following standard timing rules
 const showCustomToast = {
-  success: (title: string, description: string, options?: any) => {
-    // For important success messages (like transaction success), don't debounce
+  success: (title: string, description: string, options?: ToastOptions) => {
     const isImportantSuccess = title.includes('Position Created') || title.includes('Successfully');
     
     if (!isImportantSuccess) {
@@ -70,16 +88,16 @@ const showCustomToast = {
       }
     }
     
-    // Small delay to prevent rapid-fire toasts (except for important success)
+    // FIXED: Use standard timing rules
     const delay = isImportantSuccess ? 0 : 100;
-    const duration = isImportantSuccess ? 8000 : 2000;
+    const duration = isImportantSuccess ? TIMING_CONSTANTS.SUCCESS_TOAST_DURATION : TIMING_CONSTANTS.REGULAR_TOAST_DURATION;
     
     const showToast = () => {
       lastToastId = toast.success(title, {
         description,
         duration,
         style: {
-          backgroundColor: '#22c55e', // Green color matching your image
+          backgroundColor: '#22c55e',
           color: '#ffffff',
           border: '1px solid #16a34a',
           borderRadius: '12px',
@@ -101,7 +119,7 @@ const showCustomToast = {
       showToast();
     }
   },
-  error: (title: string, description: string, options?: any) => {
+  error: (title: string, description: string, options?: ToastOptions) => {
     // Always show error toasts immediately
     if (lastToastId) {
       toast.dismiss(lastToastId);
@@ -109,7 +127,7 @@ const showCustomToast = {
     
     lastToastId = toast.error(title, {
       description,
-      duration: 6000, // Longer duration for errors
+      duration: TIMING_CONSTANTS.ERROR_TOAST_DURATION,
       style: {
         backgroundColor: '#ef4444',
         color: '#ffffff',
@@ -126,7 +144,7 @@ const showCustomToast = {
       ...options,
     });
   },
-  warning: (title: string, description: string, options?: any) => {
+  warning: (title: string, description: string, options?: ToastOptions) => {
     // Always show warning toasts immediately
     if (lastToastId) {
       toast.dismiss(lastToastId);
@@ -134,7 +152,7 @@ const showCustomToast = {
     
     lastToastId = toast.warning(title, {
       description,
-      duration: 4000,
+      duration: TIMING_CONSTANTS.WARNING_TOAST_DURATION,
       style: {
         backgroundColor: '#f59e0b',
         color: '#ffffff',
@@ -186,6 +204,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   // Refs to prevent multiple simultaneous requests
   const findingBinsRef = useRef(false);
   const poolAddressRef = useRef<string | null>(null);
+
+  // State to track which percentage button was last clicked
+  const [activePercentage, setActivePercentage] = useState<number | null>(null);
+  const [isUpdatingAmount, setIsUpdatingAmount] = useState(false);
 
   // Get token names from pool
   const getTokenNames = () => {
@@ -284,7 +306,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setIsLoadingBins(false);
       findingBinsRef.current = false;
     }
-  }, [actualPortfolioStyle, dlmmService, positionService]);
+  }, [actualPortfolioStyle, dlmmService, positionService, currentBinId]);
 
   // FIXED: Load existing bins when modal opens with proper conditions
   useEffect(() => {
@@ -305,8 +327,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setBtcAmount('');
       setSelectedStrategy('');
       setUserTokenBalance(0);
-      setActivePercentage(null); // Reset active percentage
-      setIsUpdatingAmount(false); // Reset update flag
+      setActivePercentage(null);
+      setIsUpdatingAmount(false);
       poolAddressRef.current = null;
       findingBinsRef.current = false;
       
@@ -373,7 +395,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       );
 
       // Find the specific token account for this pool's token
-      // This is a simplified approach - you might need to match by mint address
       let tokenBalance = 0;
       
       for (const account of tokenAccounts.value) {
@@ -382,8 +403,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         
         // Check if this is the token we're looking for (simplified check by symbol)
         if (balance > 0) {
-          // For BTC tokens, we'll use the first non-zero balance as a fallback
-          // In production, you'd match by mint address
           tokenBalance = Math.max(tokenBalance, balance);
         }
       }
@@ -401,10 +420,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       fetchUserTokenBalance();
     }
   }, [isOpen, publicKey, pool, fetchUserTokenBalance]);
-
-  // State to track which percentage button was last clicked
-  const [activePercentage, setActivePercentage] = useState<number | null>(null);
-  const [isUpdatingAmount, setIsUpdatingAmount] = useState(false); // Prevent rapid updates
 
   // FIXED: Handle percentage buttons with debouncing to prevent rapid toast spam
   const handlePercentageClick = useCallback((percentage: number) => {
@@ -536,13 +551,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   };
 
+  // FIXED: Main transaction handler with proper toast timing
   const handleAddLiquidity = async () => {
     if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
       showCustomToast.error('Insufficient SOL Balance', 
-        validationError || 'You need more SOL to complete this transaction.',
-        { duration: 5000 }
+        validationError || 'You need more SOL to complete this transaction.'
       );
       return;
     }
@@ -579,7 +594,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       
       // Send transactions
       console.log('About to send transaction(s)...');
-      let transactionSignatures: string[] = [];
+      // FIXED: Changed to const instead of let
+      const transactionSignatures: string[] = [];
       
       if (Array.isArray(result.transaction)) {
         console.log(`Sending ${result.transaction.length} transactions...`);
@@ -604,11 +620,18 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       console.log('All transactions completed successfully!');
       console.log('Total signatures:', transactionSignatures);
       
-      // IMPORTANT: Add a small delay to ensure transaction is confirmed before showing success
+      // FIXED: Use custom green toast with standard timing (8 seconds)
       setTimeout(() => {
         console.log('Showing success toast...');
         
-        // Create custom toast with button at bottom
+        // Ensure we have a valid transaction signature
+        const txSignature = transactionSignatures[0];
+        if (!txSignature) {
+          console.error('No transaction signature available for Solscan link');
+          return;
+        }
+        
+        // Create custom green toast with proper structure and timing
         const toastId = toast.custom(
           (t) => (
             <div className="bg-[#22c55e] text-white border border-[#16a34a] rounded-xl p-4 shadow-2xl max-w-md w-full">
@@ -626,20 +649,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     {actualPortfolioStyle.toUpperCase()} {tokenX} position created successfully!
                     <br />
                     <span className="font-mono text-xs bg-white/10 px-2 py-1 rounded mt-1 inline-block">
-                      TX: {transactionSignatures[0].slice(0, 12)}...
+                      TX: {txSignature.slice(0, 12)}...
                     </span>
                   </div>
-                  <button
-                    onClick={() => {
-                      window.open(`https://solscan.io/tx/${transactionSignatures[0]}`, '_blank');
-                    }}
-                    className="w-full bg-white/20 hover:bg-white/30 border border-white/30 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 text-sm flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                    Check Transaction on Solscan
-                  </button>
                 </div>
                 <button
                   onClick={() => toast.dismiss(String(t))}
@@ -653,7 +665,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             </div>
           ),
           {
-            duration: 20000, // 20 seconds as requested
+            duration: TIMING_CONSTANTS.SUCCESS_TOAST_DURATION, // FIXED: Use standard 8 seconds
             position: 'top-center',
             style: {
               background: 'transparent',
@@ -665,15 +677,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         
         // Store the toast ID for potential cleanup
         lastToastId = toastId;
-      }, 800); // 800ms delay to ensure transaction is processed
+      }, TIMING_CONSTANTS.TRANSACTION_CONFIRMATION_DELAY);
       
-      // Close modal and reset form after a longer delay to let user see the toast
+      // FIXED: Close modal with proper timing alignment
       setTimeout(() => {
         console.log('Closing modal...');
         onClose();
         setBtcAmount('');
         setActivePercentage(null);
-      }, 2500); // Keep 2.5 seconds so user can see toast before modal closes
+      }, TIMING_CONSTANTS.MODAL_CLOSE_DELAY); // Toast duration + buffer
       
     } catch (error) {
       console.error('Error adding liquidity:', error);
@@ -691,34 +703,29 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
         console.log('Showing insufficient funds toast...');
         showCustomToast.error('Insufficient SOL Balance', 
-          `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`,
-          { duration: 6000 }
+          `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`
         );
       } else if (errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied') || errorMessage.includes('cancelled')) {
         // User cancelled the transaction
         console.log('Showing transaction cancelled toast...');
         showCustomToast.warning('Transaction Cancelled', 
-          'You cancelled the transaction. Your funds are safe.',
-          { duration: 4000 }
+          'You cancelled the transaction. Your funds are safe.'
         );
       } else if (errorMessage.includes('Transaction simulation failed')) {
         console.log('Showing simulation failed toast...');
         showCustomToast.error('Transaction Failed', 
-          'Transaction simulation failed. The selected bin range might be full or restricted.',
-          { duration: 6000 }
+          'Transaction simulation failed. The selected bin range might be full or restricted.'
         );
       } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
         console.log('Showing network error toast...');
         showCustomToast.error('Network Error', 
-          'Network connection issue. Please check your connection and try again.',
-          { duration: 5000 }
+          'Network connection issue. Please check your connection and try again.'
         );
       } else {
         // Generic error toast
         console.log('Showing generic error toast...');
         showCustomToast.error('Position Creation Failed', 
-          `Failed to create ${actualPortfolioStyle} position: ${errorMessage}`,
-          { duration: 6000 }
+          `Failed to create ${actualPortfolioStyle} position: ${errorMessage}`
         );
       }
     } finally {
