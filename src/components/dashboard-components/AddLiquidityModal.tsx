@@ -25,7 +25,7 @@ interface BalanceInfo {
   tokenBalance: number;
   hasEnoughSol: boolean;
   estimatedSolNeeded: number;
-  shortfall?: number;
+  shortfall: number; // Always defined, 0 when sufficient
 }
 
 interface StrategyOption {
@@ -40,55 +40,40 @@ interface StrategyOption {
   strategy: 'oneSided' | 'balanced' | 'ranged';
 }
 
-// Define proper types for toast options
-interface ToastOptions {
-  duration?: number;
-  style?: React.CSSProperties;
-  className?: string;
-  position?: 'top-center' | 'top-left' | 'top-right' | 'bottom-center' | 'bottom-left' | 'bottom-right';
-}
-
-// Cache for bin ranges to prevent repeated requests
-const binRangesCache = new Map<string, { 
-  data: ExistingBinRange[]; 
-  timestamp: number; 
-  activeBinId: number;
-}>();
-const CACHE_DURATION = 60000; // 1 minute cache
-
-// Toast management to prevent overlapping
+// Toast management
 let lastToastId: string | number | null = null;
 let toastTimeout: NodeJS.Timeout | null = null;
 
-// FIXED: Timing constants for consistency
 const TIMING_CONSTANTS = {
   TRANSACTION_CONFIRMATION_DELAY: 800,
-  SUCCESS_TOAST_DURATION: 8000, // Standard 8 seconds for important success
-  MODAL_CLOSE_DELAY: 8500, // Toast duration + buffer
+  SUCCESS_TOAST_DURATION: 8000,
+  MODAL_CLOSE_DELAY: 8500,
   ERROR_TOAST_DURATION: 6000,
   WARNING_TOAST_DURATION: 4000,
   REGULAR_TOAST_DURATION: 2000,
   TOAST_BUFFER: 500
 } as const;
 
-// FIXED: Custom toast function following standard timing rules
+// Cache for bin ranges
+const binRangesCache = new Map<string, { 
+  data: ExistingBinRange[]; 
+  timestamp: number; 
+  activeBinId: number;
+}>();
+const CACHE_DURATION = 60000;
+
 const showCustomToast = {
-  success: (title: string, description: string, options?: ToastOptions) => {
+  success: (title: string, description: string) => {
     const isImportantSuccess = title.includes('Position Created') || title.includes('Successfully');
     
-    if (!isImportantSuccess) {
-      // Only dismiss previous toast for rapid percentage updates
-      if (lastToastId) {
-        toast.dismiss(lastToastId);
-      }
-      
-      // Clear any pending toast timeout
-      if (toastTimeout) {
-        clearTimeout(toastTimeout);
-      }
+    if (!isImportantSuccess && lastToastId) {
+      toast.dismiss(lastToastId);
     }
     
-    // FIXED: Use standard timing rules
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
+    }
+    
     const delay = isImportantSuccess ? 0 : 100;
     const duration = isImportantSuccess ? TIMING_CONSTANTS.SUCCESS_TOAST_DURATION : TIMING_CONSTANTS.REGULAR_TOAST_DURATION;
     
@@ -109,7 +94,6 @@ const showCustomToast = {
         },
         className: 'custom-success-toast',
         position: 'top-center',
-        ...options,
       });
     };
     
@@ -119,8 +103,7 @@ const showCustomToast = {
       showToast();
     }
   },
-  error: (title: string, description: string, options?: ToastOptions) => {
-    // Always show error toasts immediately
+  error: (title: string, description: string) => {
     if (lastToastId) {
       toast.dismiss(lastToastId);
     }
@@ -141,11 +124,9 @@ const showCustomToast = {
       },
       className: 'custom-error-toast',
       position: 'top-center',
-      ...options,
     });
   },
-  warning: (title: string, description: string, options?: ToastOptions) => {
-    // Always show warning toasts immediately
+  warning: (title: string, description: string) => {
     if (lastToastId) {
       toast.dismiss(lastToastId);
     }
@@ -166,7 +147,6 @@ const showCustomToast = {
       },
       className: 'custom-warning-toast',
       position: 'top-center',
-      ...options,
     });
   },
 };
@@ -201,11 +181,11 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [showAccountBalance, setShowAccountBalance] = useState(false);
   const [showPoolInfo, setShowPoolInfo] = useState(false);
 
-  // Refs to prevent multiple simultaneous requests
+  // Refs
   const findingBinsRef = useRef(false);
   const poolAddressRef = useRef<string | null>(null);
 
-  // State to track which percentage button was last clicked
+  // State for percentage buttons
   const [activePercentage, setActivePercentage] = useState<number | null>(null);
   const [isUpdatingAmount, setIsUpdatingAmount] = useState(false);
 
@@ -225,15 +205,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     return parseInt(pool.binStep);
   }, [pool]);
 
-  // FIXED: Stable function with proper caching and request deduplication
+  // Find existing bin ranges
   const findExistingBinRanges = useCallback(async (poolAddress: string) => {
-    // Prevent multiple simultaneous calls for the same pool
     if (findingBinsRef.current || !poolAddress) {
       console.log('Skipping bin range request - already in progress or no pool address');
       return;
     }
 
-    // Check cache first
     const cached = binRangesCache.get(poolAddress);
     const now = Date.now();
     
@@ -256,7 +234,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const activeBin = await dlmmPool.getActiveBin();
       setCurrentBinId(activeBin.binId);
       
-      // Use the position service to find existing bin ranges with portfolio style
       const existingRanges = await positionService.findExistingBinRanges(poolAddress, 20, actualPortfolioStyle);
       
       let finalRanges: ExistingBinRange[];
@@ -265,7 +242,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         finalRanges = existingRanges;
         console.log(`Found ${existingRanges.length} existing bin ranges`);
       } else {
-        // Create a fallback range using the correct interface
         const fallbackRange: ExistingBinRange = {
           minBinId: activeBin.binId - 3,
           maxBinId: activeBin.binId + 3,
@@ -281,7 +257,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setExistingBinRanges(finalRanges);
       setBinRangesLoaded(true);
       
-      // Cache the results
       binRangesCache.set(poolAddress, {
         data: finalRanges,
         timestamp: now,
@@ -291,7 +266,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     } catch (error) {
       console.error('Error finding existing bins:', error);
       
-      // Create fallback range if everything fails
       const fallbackRange: ExistingBinRange = {
         minBinId: currentBinId ? currentBinId - 5 : 0,
         maxBinId: currentBinId ? currentBinId + 5 : 10,
@@ -308,7 +282,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [actualPortfolioStyle, dlmmService, positionService, currentBinId]);
 
-  // FIXED: Load existing bins when modal opens with proper conditions
+  // Load existing bins when modal opens
   useEffect(() => {
     if (isOpen && pool && pool.address !== poolAddressRef.current && !binRangesLoaded && !isLoadingBins) {
       poolAddressRef.current = pool.address;
@@ -316,7 +290,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen, pool, binRangesLoaded, isLoadingBins, findExistingBinRanges]);
 
-  // Reset state when modal closes or pool changes
+  // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
       setBinRangesLoaded(false);
@@ -332,12 +306,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       poolAddressRef.current = null;
       findingBinsRef.current = false;
       
-      // Clear any pending toast timeouts
       if (toastTimeout) {
         clearTimeout(toastTimeout);
         toastTimeout = null;
       }
-      // Dismiss any active toasts
       if (lastToastId) {
         toast.dismiss(lastToastId);
         lastToastId = null;
@@ -345,15 +317,13 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen]);
 
-  // Strategy options based on existing bins only
+  // Strategy options
   const strategyOptions: StrategyOption[] = useMemo(() => {
     if (existingBinRanges.length === 0) return [];
     
     const riskLevel = poolBinStep <= 5 ? 'high' : poolBinStep <= 15 ? 'medium' : 'low';
     const styleInfo = { icon: '🛡️', label: 'Conservative', color: 'text-green-400' };
-    
-    // Fixed cost since we're using existing bins
-    const estimatedCost = 0.057; // Only position rent
+    const estimatedCost = 0.057;
     
     return [
       {
@@ -388,20 +358,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
       );
 
-      // Get token accounts for the user
       const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
         publicKey,
         { programId: TOKEN_PROGRAM_ID }
       );
 
-      // Find the specific token account for this pool's token
       let tokenBalance = 0;
       
       for (const account of tokenAccounts.value) {
         const parsedInfo = account.account.data.parsed.info;
         const balance = parsedInfo.tokenAmount.uiAmount;
         
-        // Check if this is the token we're looking for (simplified check by symbol)
         if (balance > 0) {
           tokenBalance = Math.max(tokenBalance, balance);
         }
@@ -414,18 +381,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [publicKey, pool]);
 
-  // Fetch token balance when modal opens and user is connected
   useEffect(() => {
     if (isOpen && publicKey && pool) {
       fetchUserTokenBalance();
     }
   }, [isOpen, publicKey, pool, fetchUserTokenBalance]);
 
-  // FIXED: Handle percentage buttons with debouncing to prevent rapid toast spam
+  // Handle percentage buttons
   const handlePercentageClick = useCallback((percentage: number) => {
     console.log('Percentage clicked:', percentage, 'User balance:', userTokenBalance);
     
-    // Prevent rapid clicking
     if (isUpdatingAmount) {
       console.log('Update in progress, ignoring click');
       return;
@@ -438,29 +403,23 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
     
     setIsUpdatingAmount(true);
-    
-    // Set active percentage for visual feedback
     setActivePercentage(percentage);
     
-    // FIXED: Calculate the correct percentage amount
     const amount = (userTokenBalance * percentage / 100).toFixed(6);
     console.log(`Setting ${percentage}% of balance:`, amount);
     setBtcAmount(amount);
     
-    // Show feedback toast with correct percentage (debounced)
     showCustomToast.success('Amount Updated', `Set to ${percentage}% of your balance: ${amount} ${tokenX}`);
     
-    // Reset update flag after a short delay
     setTimeout(() => {
       setIsUpdatingAmount(false);
     }, 300);
   }, [userTokenBalance, tokenX, isUpdatingAmount]);
 
-  // FIXED: Handle max button with debouncing
+  // Handle max button
   const handleMaxClick = useCallback(() => {
     console.log('Max clicked, User balance:', userTokenBalance);
     
-    // Prevent rapid clicking
     if (isUpdatingAmount) {
       console.log('Update in progress, ignoring click');
       return;
@@ -473,24 +432,20 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
     
     setIsUpdatingAmount(true);
-    
-    // Set active percentage to 100 for MAX
     setActivePercentage(100);
     
     const amount = userTokenBalance.toFixed(6);
     console.log('Setting max amount:', amount);
     setBtcAmount(amount);
     
-    // Show feedback toast (debounced)
     showCustomToast.success('Amount Updated', `Set to maximum: ${amount} ${tokenX}`);
     
-    // Reset update flag after a short delay
     setTimeout(() => {
       setIsUpdatingAmount(false);
     }, 300);
   }, [userTokenBalance, tokenX, isUpdatingAmount]);
 
-  // Balance checking with simplified cost calculation (NO TRANSACTION FEES)
+  // Balance checking
   const checkUserBalances = useCallback(async () => {
     if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0 || !selectedStrategyOption) return;
 
@@ -505,11 +460,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const solBalanceLamports = await connection.getBalance(publicKey);
       const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
       
-      // UPDATED: Only position rent (removed transaction fees)
-      const estimatedSolNeeded = selectedStrategyOption.estimatedCost; // Only position rent
-      
+      const estimatedSolNeeded = selectedStrategyOption.estimatedCost;
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
-      const shortfall = hasEnoughSol ? 0 : estimatedSolNeeded - solBalance;
+      const shortfall = Math.max(0, estimatedSolNeeded - solBalance); // Always 0 or positive
 
       const balanceInfo: BalanceInfo = {
         solBalance,
@@ -551,7 +504,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   };
 
-  // FIXED: Main transaction handler with proper toast timing
+  // Main transaction handler
   const handleAddLiquidity = async () => {
     if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
@@ -565,10 +518,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     setIsLoading(true);
     
     try {
-      const decimals = 8; // Default for BTC tokens
+      const decimals = 8;
       const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
       
-      // Use the first available existing range
       const selectedRange = existingBinRanges[0];
       
       console.log(`Creating ${userPortfolioStyle} position using EXISTING bins only:`, {
@@ -580,7 +532,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         token: tokenX
       });
       
-      // Create position using existing bins only
       const result = await positionService.createPositionWithExistingBins({
         poolAddress: pool.address,
         userPublicKey: publicKey,
@@ -592,9 +543,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         useAutoFill: false
       }, selectedRange);
       
-      // Send transactions
       console.log('About to send transaction(s)...');
-      // FIXED: Changed to const instead of let
       const transactionSignatures: string[] = [];
       
       if (Array.isArray(result.transaction)) {
@@ -620,18 +569,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       console.log('All transactions completed successfully!');
       console.log('Total signatures:', transactionSignatures);
       
-      // FIXED: Use custom green toast with standard timing (8 seconds)
       setTimeout(() => {
         console.log('Showing success toast...');
         
-        // Ensure we have a valid transaction signature
         const txSignature = transactionSignatures[0];
         if (!txSignature) {
           console.error('No transaction signature available for Solscan link');
           return;
         }
         
-        // Create custom green toast with proper structure and timing
         const toastId = toast.custom(
           (t) => (
             <div className="bg-[#22c55e] text-white border border-[#16a34a] rounded-xl p-4 shadow-2xl max-w-md w-full">
@@ -665,7 +611,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             </div>
           ),
           {
-            duration: TIMING_CONSTANTS.SUCCESS_TOAST_DURATION, // FIXED: Use standard 8 seconds
+            duration: TIMING_CONSTANTS.SUCCESS_TOAST_DURATION,
             position: 'top-center',
             style: {
               background: 'transparent',
@@ -675,17 +621,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           }
         );
         
-        // Store the toast ID for potential cleanup
         lastToastId = toastId;
       }, TIMING_CONSTANTS.TRANSACTION_CONFIRMATION_DELAY);
       
-      // FIXED: Close modal with proper timing alignment
       setTimeout(() => {
         console.log('Closing modal...');
         onClose();
         setBtcAmount('');
         setActivePercentage(null);
-      }, TIMING_CONSTANTS.MODAL_CLOSE_DELAY); // Toast duration + buffer
+      }, TIMING_CONSTANTS.MODAL_CLOSE_DELAY);
       
     } catch (error) {
       console.error('Error adding liquidity:', error);
@@ -699,14 +643,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         isNetworkError: errorMessage.includes('Network') || errorMessage.includes('network')
       });
       
-      // Error handling with specific error toasts
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
         console.log('Showing insufficient funds toast...');
         showCustomToast.error('Insufficient SOL Balance', 
           `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`
         );
       } else if (errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied') || errorMessage.includes('cancelled')) {
-        // User cancelled the transaction
         console.log('Showing transaction cancelled toast...');
         showCustomToast.warning('Transaction Cancelled', 
           'You cancelled the transaction. Your funds are safe.'
@@ -722,7 +664,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           'Network connection issue. Please check your connection and try again.'
         );
       } else {
-        // Generic error toast
         console.log('Showing generic error toast...');
         showCustomToast.error('Position Creation Failed', 
           `Failed to create ${actualPortfolioStyle} position: ${errorMessage}`
@@ -774,10 +715,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
                 <div className="space-y-2 border-t border-border pt-4">
                   <div className="flex justify-between items-center text-sm">
-                    <span>Pool:</span>
-                    <span className="text-white font-medium">{pool?.name}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
                     <span>Bin Step:</span>
                     <span className="text-primary font-medium">{poolBinStep}</span>
                   </div>
@@ -811,7 +748,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             </div>
           )}
 
-          {/* Balance Display */}
+          {/* Balance Display - FIXED VERSION */}
           {balanceInfo && (
             <div className="bg-[#0f0f0f] border border-border rounded-lg">
               <div 
@@ -844,7 +781,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                       <span>SOL Needed:</span>
                       <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
                     </div>
-                    {balanceInfo.shortfall && balanceInfo.shortfall > 0 && (
+                    {/* 🎯 THE FIX: Explicit check prevents rendering 0 */}
+                    {balanceInfo.shortfall > 0 && (
                       <div className="flex justify-between items-center text-sm">
                         <span>Shortfall:</span>
                         <span className="text-red-400 font-medium">-{balanceInfo.shortfall.toFixed(4)} SOL</span>
@@ -857,7 +795,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           )}
 
           {/* Validation Error */}
-          {validationError && (
+          {validationError && validationError.length > 0 && (
             <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-red-200">{validationError}</div>
@@ -1047,7 +985,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             </div>
           )}
 
-          {/* UPDATED: Cost Breakdown (No Transaction Fees) */}
+          {/* Cost Breakdown */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg">
             <div 
               className="p-4 cursor-pointer flex items-center justify-between"
