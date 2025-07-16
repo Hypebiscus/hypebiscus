@@ -221,57 +221,48 @@ export class MeteoraPositionService {
   }
 
   /**
-   * FIXED: Create smart bin ranges based on portfolio style using mathematical heuristics
-   * This approach is much more efficient and avoids rate limiting while respecting user preferences
+   * MODIFIED: Create smart bin ranges based on portfolio style using mathematical heuristics
+   * Updated with specific bin counts: Aggressive 60-63, Moderate 64-66, Conservative 67-69
    */
   private createSmartBinRanges(activeBinId: number, maxRangeWidth: number, portfolioStyle: string): ExistingBinRange[] {
     const ranges: ExistingBinRange[] = [];
     
-    // Portfolio-specific range patterns
+    // MODIFIED: Portfolio-specific bin counts
+    // Aggressive: 60-63 bins, Moderate: 64-66 bins, Conservative: 67-69 bins
+    
     let rangePatterns: Array<{ width: number; offset: number; name: string; popularity: number }>;
     
     switch (portfolioStyle.toLowerCase()) {
       case 'conservative':
         rangePatterns = [
-          // Wide, stable ranges - lower risk
-          { width: 20, offset: 0, name: 'Wide Conservative', popularity: 0.9 },
-          { width: 16, offset: 0, name: 'Standard Conservative', popularity: 0.8 },
-          { width: 12, offset: 0, name: 'Moderate Conservative', popularity: 0.7 },
-          { width: 14, offset: 3, name: 'Conservative Above Price', popularity: 0.6 },
-          { width: 14, offset: -3, name: 'Conservative Below Price', popularity: 0.6 },
+          // Conservative: 67-69 bins (widest range, safest)
+          { width: 69, offset: 0, name: 'Conservative Max Range', popularity: 0.9 },
+          { width: 68, offset: 0, name: 'Conservative Wide Range', popularity: 0.8 },
+          { width: 67, offset: 0, name: 'Conservative Standard Range', popularity: 0.7 },
         ];
         break;
         
       case 'moderate':
         rangePatterns = [
-          // Balanced ranges - medium risk/reward
-          { width: 14, offset: 0, name: 'Balanced Moderate', popularity: 0.9 },
-          { width: 10, offset: 0, name: 'Standard Moderate', popularity: 0.8 },
-          { width: 12, offset: 4, name: 'Moderate Above Price', popularity: 0.7 },
-          { width: 12, offset: -4, name: 'Moderate Below Price', popularity: 0.7 },
-          { width: 8, offset: 0, name: 'Tight Moderate', popularity: 0.6 },
-          { width: 16, offset: 0, name: 'Wide Moderate', popularity: 0.5 },
+          // Moderate: 64-66 bins (balanced range)
+          { width: 66, offset: 0, name: 'Moderate Wide Range', popularity: 0.9 },
+          { width: 65, offset: 0, name: 'Moderate Standard Range', popularity: 0.8 },
+          { width: 64, offset: 0, name: 'Moderate Tight Range', popularity: 0.7 },
         ];
         break;
         
       case 'aggressive':
         rangePatterns = [
-          // Narrow, concentrated ranges - higher risk/reward
-          { width: 6, offset: 0, name: 'Tight Aggressive', popularity: 0.9 },
-          { width: 8, offset: 0, name: 'Standard Aggressive', popularity: 0.8 },
-          { width: 4, offset: 0, name: 'Very Tight Aggressive', popularity: 0.7 },
-          { width: 6, offset: 2, name: 'Aggressive Above Price', popularity: 0.6 },
-          { width: 6, offset: -2, name: 'Aggressive Below Price', popularity: 0.6 },
-          { width: 10, offset: 0, name: 'Wide Aggressive', popularity: 0.5 },
+          // Aggressive: 60-63 bins (tighter range, more concentrated)
+          { width: 63, offset: 0, name: 'Aggressive Wide Range', popularity: 0.9 },
+          { width: 62, offset: 0, name: 'Aggressive Standard Range', popularity: 0.8 },
+          { width: 60, offset: 0, name: 'Aggressive Tight Range', popularity: 0.7 },
         ];
         break;
         
       default:
-        // Fallback to moderate
         rangePatterns = [
-          { width: 10, offset: 0, name: 'Default Moderate', popularity: 0.8 },
-          { width: 8, offset: 0, name: 'Default Tight', popularity: 0.7 },
-          { width: 12, offset: 0, name: 'Default Wide', popularity: 0.6 },
+          { width: 65, offset: 0, name: 'Default Range', popularity: 0.8 },
         ];
     }
     
@@ -408,11 +399,6 @@ export class MeteoraPositionService {
     
     return likelyBins;
   }
-
-  /**
-   * REMOVED: The old checkBinsExistence method that was causing rate limiting
-   * Replaced with smart heuristics in createSmartBinRanges
-   */
 
   /**
    * Simplified cost estimation - only position rent since we use existing bins

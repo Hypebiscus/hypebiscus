@@ -38,6 +38,8 @@ interface StrategyOption {
   portfolioStyle: string;
   isDefault?: boolean;
   strategy: 'oneSided' | 'balanced' | 'ranged';
+  binRange: string;
+  expectedBins: number;
 }
 
 // Toast management
@@ -234,24 +236,25 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       const activeBin = await dlmmPool.getActiveBin();
       setCurrentBinId(activeBin.binId);
       
-      const existingRanges = await positionService.findExistingBinRanges(poolAddress, 20, actualPortfolioStyle);
+      const existingRanges = await positionService.findExistingBinRanges(poolAddress, 69, actualPortfolioStyle);
       
       let finalRanges: ExistingBinRange[];
       
       if (existingRanges.length > 0) {
         finalRanges = existingRanges;
-        console.log(`Found ${existingRanges.length} existing bin ranges`);
+        console.log(`Found ${existingRanges.length} existing bin ranges (60-69 bins)`);
       } else {
+        // Fallback range using 60-69 bin strategy
         const fallbackRange: ExistingBinRange = {
-          minBinId: activeBin.binId - 3,
-          maxBinId: activeBin.binId + 3,
-          existingBins: [activeBin.binId],
-          liquidityDepth: 1,
+          minBinId: activeBin.binId - 30,
+          maxBinId: activeBin.binId + 30,
+          existingBins: Array.from({length: 61}, (_, i) => activeBin.binId - 30 + i),
+          liquidityDepth: 61,
           isPopular: false,
-          description: 'Conservative range around current price (safe default)'
+          description: 'Conservative 60-bin range around current price (maximum efficiency)'
         };
         finalRanges = [fallbackRange];
-        console.log('Using fallback range around active bin:', activeBin.binId);
+        console.log('Using fallback 60-bin range around active bin:', activeBin.binId);
       }
       
       setExistingBinRanges(finalRanges);
@@ -267,12 +270,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       console.error('Error finding existing bins:', error);
       
       const fallbackRange: ExistingBinRange = {
-        minBinId: currentBinId ? currentBinId - 5 : 0,
-        maxBinId: currentBinId ? currentBinId + 5 : 10,
-        existingBins: currentBinId ? [currentBinId] : [0],
-        liquidityDepth: 1,
+        minBinId: currentBinId ? currentBinId - 30 : 0,
+        maxBinId: currentBinId ? currentBinId + 30 : 60,
+        existingBins: currentBinId ? Array.from({length: 61}, (_, i) => currentBinId - 30 + i) : Array.from({length: 61}, (_, i) => i),
+        liquidityDepth: 61,
         isPopular: false,
-        description: 'Default safe range (position rent only)'
+        description: 'Default 60-bin range (maximum efficiency, position rent only)'
       };
       setExistingBinRanges([fallbackRange]);
       setBinRangesLoaded(true);
@@ -317,25 +320,68 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   }, [isOpen]);
 
-  // Strategy options
+  // Strategy options with 60-69 bins
   const strategyOptions: StrategyOption[] = useMemo(() => {
     if (existingBinRanges.length === 0) return [];
     
     const riskLevel = poolBinStep <= 5 ? 'high' : poolBinStep <= 15 ? 'medium' : 'low';
-    const styleInfo = { icon: '🛡️', label: 'Conservative', color: 'text-green-400' };
+    
+    // Updated style info based on portfolio preference (60-69 bins)
+    let styleInfo: { icon: string; label: string; color: string; binRange: string; expectedBins: number };
+    
+    switch (actualPortfolioStyle.toLowerCase()) {
+      case 'conservative':
+        styleInfo = { 
+          icon: '🛡️', 
+          label: 'Conservative', 
+          color: 'text-green-400',
+          binRange: '65-69 bins',
+          expectedBins: 67
+        };
+        break;
+      case 'moderate':
+        styleInfo = { 
+          icon: '⚖️', 
+          label: 'Moderate', 
+          color: 'text-blue-400',
+          binRange: '62-65 bins',
+          expectedBins: 63
+        };
+        break;
+      case 'aggressive':
+        styleInfo = { 
+          icon: '🚀', 
+          label: 'Aggressive', 
+          color: 'text-red-400',
+          binRange: '60-62 bins',
+          expectedBins: 61
+        };
+        break;
+      default:
+        styleInfo = { 
+          icon: '⚖️', 
+          label: 'Moderate', 
+          color: 'text-blue-400',
+          binRange: '62-65 bins',
+          expectedBins: 63
+        };
+    }
+    
     const estimatedCost = 0.057;
     
     return [
       {
         id: 'existing-bins-primary',
-        label: `${styleInfo.label} Position (Existing Bins)`,
-        description: `Safe ${actualPortfolioStyle} position using only existing price bins - no additional bin creation costs`,
+        label: `${styleInfo.label} Position (${styleInfo.binRange})`,
+        description: `Maximum capital efficiency ${actualPortfolioStyle} position using ${styleInfo.binRange} existing price bins - leverages near-full bin array capacity for optimal fee capture across the widest profitable price range`,
         binStep: poolBinStep,
         estimatedCost,
         riskLevel,
         portfolioStyle: actualPortfolioStyle,
         strategy: 'oneSided',
-        isDefault: true
+        isDefault: true,
+        binRange: styleInfo.binRange,
+        expectedBins: styleInfo.expectedBins
       }
     ];
   }, [actualPortfolioStyle, poolBinStep, existingBinRanges]);
@@ -462,7 +508,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       
       const estimatedSolNeeded = selectedStrategyOption.estimatedCost;
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
-      const shortfall = Math.max(0, estimatedSolNeeded - solBalance); // Always 0 or positive
+      const shortfall = Math.max(0, estimatedSolNeeded - solBalance);
 
       const balanceInfo: BalanceInfo = {
         solBalance,
@@ -523,11 +569,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       
       const selectedRange = existingBinRanges[0];
       
-      console.log(`Creating ${userPortfolioStyle} position using EXISTING bins only:`, {
+      console.log(`Creating ${userPortfolioStyle} position using 60-69 EXISTING bins:`, {
         poolBinStep,
         userStyle: userPortfolioStyle,
         range: `${selectedRange.minBinId} to ${selectedRange.maxBinId}`,
-        existingBins: selectedRange.existingBins,
+        existingBins: selectedRange.existingBins.length,
+        expectedBins: selectedStrategyOption.expectedBins,
         amount: btcAmount,
         token: tokenX
       });
@@ -590,9 +637,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-lg mb-1">🎉 Position Created Successfully!</div>
+                  <div className="font-semibold text-lg mb-1">🎉 Maximum Efficiency Position Created!</div>
                   <div className="text-sm text-white/90 mb-3">
-                    {actualPortfolioStyle.toUpperCase()} {tokenX} position created successfully!
+                    {actualPortfolioStyle.toUpperCase()} {tokenX} position with {selectedStrategyOption.expectedBins} bins created successfully!
                     <br />
                     <span className="font-mono text-xs bg-white/10 px-2 py-1 rounded mt-1 inline-block">
                       TX: {txSignature.slice(0, 12)}...
@@ -635,38 +682,25 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
-      console.log('Error type detection:', {
-        errorMessage,
-        isInsufficientFunds: errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports'),
-        isUserRejected: errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied'),
-        isSimulationFailed: errorMessage.includes('Transaction simulation failed'),
-        isNetworkError: errorMessage.includes('Network') || errorMessage.includes('network')
-      });
-      
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        console.log('Showing insufficient funds toast...');
         showCustomToast.error('Insufficient SOL Balance', 
-          `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs!`
+          `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs with 60-69 bin strategy!`
         );
       } else if (errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied') || errorMessage.includes('cancelled')) {
-        console.log('Showing transaction cancelled toast...');
         showCustomToast.warning('Transaction Cancelled', 
           'You cancelled the transaction. Your funds are safe.'
         );
       } else if (errorMessage.includes('Transaction simulation failed')) {
-        console.log('Showing simulation failed toast...');
         showCustomToast.error('Transaction Failed', 
-          'Transaction simulation failed. The selected bin range might be full or restricted.'
+          'Transaction simulation failed. The selected 60-69 bin range might be full or restricted.'
         );
       } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
-        console.log('Showing network error toast...');
         showCustomToast.error('Network Error', 
           'Network connection issue. Please check your connection and try again.'
         );
       } else {
-        console.log('Showing generic error toast...');
         showCustomToast.error('Position Creation Failed', 
-          `Failed to create ${actualPortfolioStyle} position: ${errorMessage}`
+          `Failed to create ${actualPortfolioStyle} maximum efficiency position: ${errorMessage}`
         );
       }
     } finally {
@@ -675,18 +709,22 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
 
   const getBinStepDescription = (binStep: number) => {
-    if (binStep <= 5) return 'Very high precision (0.05% increments) - maximum fee capture';
-    if (binStep <= 15) return 'Standard precision (0.1-1.5% increments) - balanced approach';
-    return 'Conservative precision (5%+ increments) - stable and predictable';
+    const baseDescription = binStep <= 5 
+      ? 'Very high precision (0.05% increments) - maximum fee capture'
+      : binStep <= 15 
+        ? 'Standard precision (0.1-1.5% increments) - balanced approach'
+        : 'Conservative precision (5%+ increments) - stable and predictable';
+        
+    return `${baseDescription}. Using 60-69 bins maximizes your fee capture across the widest profitable price range.`;
   };
   
   return (
     <Dialog open={isOpen && !!pool} onOpenChange={onClose}>
       <DialogContent className="bg-[#161616] border-border text-white max-w-lg mx-auto max-h-[90vh] overflow-y-auto">
         <DialogHeader className="space-y-3">
-          <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity</DialogTitle>
+          <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity (Max Efficiency)</DialogTitle>
           <DialogDescription className="text-sm text-sub-text">
-            Using your {actualPortfolioStyle} strategy with existing bins only (no creation costs)
+            Using your {actualPortfolioStyle} strategy with 60-69 existing bins for maximum capital efficiency
           </DialogDescription>
         </DialogHeader>
         
@@ -715,12 +753,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
                 <div className="space-y-2 border-t border-border pt-4">
                   <div className="flex justify-between items-center text-sm">
+                    <span>Pool:</span>
+                    <span className="text-white font-medium">{pool?.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
                     <span>Bin Step:</span>
                     <span className="text-primary font-medium">{poolBinStep}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span>Approach:</span>
-                    <span className="text-green-400 font-medium">✅ Existing Bins Only</span>
+                    <span>Strategy:</span>
+                    <span className="text-green-400 font-medium">✅ 60-69 Bins Max Efficiency</span>
                   </div>
                 </div>
               </div>
@@ -731,19 +773,19 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           {isLoadingBins ? (
             <div className="bg-[#0f0f0f] border border-border rounded-lg p-4 text-center">
               <Loader2 className="h-5 w-5 animate-spin text-primary mx-auto mb-2" />
-              <p className="text-sm text-sub-text">Finding existing price ranges...</p>
+              <p className="text-sm text-sub-text">Finding 60-69 bin ranges for maximum efficiency...</p>
             </div>
           ) : existingBinRanges.length > 0 && (
             <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-2">
                 <CheckCircle className="h-5 w-5 text-green-400" />
-                <span className="text-green-400 font-medium">Existing Bins Found</span>
+                <span className="text-green-400 font-medium">Maximum Efficiency Bins Found</span>
               </div>
               <p className="text-sm text-white">
                 Using range: {existingBinRanges[0]?.description}
               </p>
               <p className="text-xs text-green-300 mt-1">
-                ✅ No bin creation costs - using existing liquidity infrastructure
+                🚀 60-69 bins strategy - Maximum capital efficiency with existing infrastructure
               </p>
             </div>
           )}
@@ -805,7 +847,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           {/* Amount Input */}
           <div className="space-y-3">
             <label className="text-sm text-sub-text block font-medium">
-              {tokenX} Amount to Provide
+              {tokenX} Amount to Provide (60-69 Bins Strategy)
             </label>
             
             {/* Token Balance Display */}
@@ -912,7 +954,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           {/* Strategy Display */}
           <div className="space-y-4">
             <label className="text-sm text-sub-text block font-medium">
-              💡 Your Position Strategy
+              🚀 Your Maximum Efficiency Position Strategy
             </label>
             
             <div className="grid gap-3">
@@ -928,7 +970,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                           {option.label}
                         </div>
                         <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30 whitespace-nowrap">
-                          NO BIN COSTS
+                          MAX EFFICIENCY
                         </div>
                       </div>
                       <div className="text-xs text-sub-text mb-2">
@@ -936,8 +978,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                       </div>
                       <div className="flex items-center gap-4 text-xs flex-wrap">
                         <span className="whitespace-nowrap">Bin Step: {option.binStep}</span>
+                        <span className="whitespace-nowrap">Expected Bins: {option.expectedBins}</span>
                         <span className="whitespace-nowrap">Cost: ~{option.estimatedCost.toFixed(3)} SOL</span>
-                        <span className="whitespace-nowrap">Strategy: Existing Bins Only</span>
+                        <span className="whitespace-nowrap">Strategy: 60-69 Bins Maximum</span>
                       </div>
                     </div>
                     <CheckCircle className="h-5 w-5 text-primary flex-shrink-0 ml-2" />
@@ -957,7 +1000,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Info className="h-5 w-5 flex-shrink-0 text-primary" />
                   <span className="text-sm text-sub-text font-medium">
-                    Strategy Details (Existing Bins Only)
+                    Strategy Details (60-69 Bins Max Efficiency)
                   </span>
                 </div>
                 {showStrategyDetails ? (
@@ -973,11 +1016,12 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     <div>
                       <div className="font-medium text-white mb-2">Position Details:</div>
                       <div>• Bin Step {poolBinStep}: {getBinStepDescription(poolBinStep)}</div>
-                      <div>• Portfolio Style: {actualPortfolioStyle.toUpperCase()} - matches your risk preference</div>
-                      <div>• Position Type: One-sided {tokenX} only</div>
-                      <div>• Range: Uses existing price bins only</div>
-                      <div>• ✅ Cost Advantage: No bin creation fees - significant savings!</div>
-                      <div>• Safety: Lower risk by using established price ranges</div>
+                      <div>• Portfolio Style: {actualPortfolioStyle.toUpperCase()} - optimized for maximum capital efficiency</div>
+                      <div>• Position Type: One-sided {tokenX} with {selectedStrategyOption.expectedBins} bins coverage</div>
+                      <div>• Range: Uses maximum existing price bin coverage (near protocol limit of 69)</div>
+                      <div>• ✅ Capital Efficiency: Maximum possible fee capture with existing infrastructure</div>
+                      <div>• 🎯 Fee Optimization: Covers widest profitable price range for sustained earnings</div>
+                      <div>• 🛡️ Safety: Lower risk through diversified price exposure across many bins</div>
                     </div>
                   </div>
                 </div>
@@ -992,7 +1036,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               onClick={() => setShowCostBreakdown(!showCostBreakdown)}
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown</span>
+                <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown (Max Efficiency)</span>
                 <span className="text-primary font-medium">
                   ~{selectedStrategyOption ? selectedStrategyOption.estimatedCost.toFixed(3) : '0.057'} SOL
                 </span>
@@ -1015,6 +1059,10 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     <span>Bin Creation Cost:</span>
                     <span className="text-green-400 font-medium">FREE ✅</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span>Capital Efficiency:</span>
+                    <span className="text-green-400 font-medium">MAXIMUM 🎯</span>
+                  </div>
                   <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
                     <span>Total Estimated:</span>
                     <span className="text-primary">
@@ -1023,7 +1071,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                   </div>
                 </div>
                 <div className="mt-3 text-xs text-green-400">
-                  💡 Major savings! Using existing bins eliminates expensive bin creation costs (typically 0.075+ SOL per new bin).
+                  🚀 Maximum efficiency! Using {selectedStrategyOption.expectedBins} bins ({selectedStrategyOption.binRange}) provides the widest fee capture range possible while eliminating expensive bin creation costs. Your capital works across the maximum number of profitable price levels.
                 </div>
               </div>
             )}
@@ -1047,15 +1095,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Creating Position...
+                Creating Max Efficiency Position...
               </>
             ) : isLoadingBins ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Finding Bins...
+                Finding 60-69 Bins...
               </>
             ) : (
-              `Create ${actualPortfolioStyle} Position`
+              `Create ${actualPortfolioStyle} Position (60-69 Bins)`
             )}
           </Button>
           <Button 
