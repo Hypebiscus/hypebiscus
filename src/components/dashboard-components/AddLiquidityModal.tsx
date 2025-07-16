@@ -25,35 +25,26 @@ interface BalanceInfo {
   tokenBalance: number;
   hasEnoughSol: boolean;
   estimatedSolNeeded: number;
-  shortfall: number; // Always defined, 0 when sufficient
+  shortfall: number;
 }
 
 interface StrategyOption {
   id: string;
+  icon: string;
   label: string;
+  subtitle: string;
   description: string;
-  binStep: number;
   estimatedCost: number;
   riskLevel: 'low' | 'medium' | 'high';
-  portfolioStyle: string;
   isDefault?: boolean;
-  strategy: 'oneSided' | 'balanced' | 'ranged';
-  binRange: string;
-  expectedBins: number;
 }
 
-// Toast management
-let lastToastId: string | number | null = null;
-let toastTimeout: NodeJS.Timeout | null = null;
-
-const TIMING_CONSTANTS = {
-  TRANSACTION_CONFIRMATION_DELAY: 800,
-  SUCCESS_TOAST_DURATION: 8000,
-  MODAL_CLOSE_DELAY: 8500,
-  ERROR_TOAST_DURATION: 6000,
-  WARNING_TOAST_DURATION: 4000,
-  REGULAR_TOAST_DURATION: 2000,
-  TOAST_BUFFER: 500
+// Simplified timing constants
+const TIMING = {
+  TRANSACTION_DELAY: 800,
+  SUCCESS_DURATION: 5000,
+  MODAL_CLOSE_DELAY: 5500,
+  ERROR_DURATION: 4000
 } as const;
 
 // Cache for bin ranges
@@ -64,93 +55,54 @@ const binRangesCache = new Map<string, {
 }>();
 const CACHE_DURATION = 60000;
 
-const showCustomToast = {
+// Toast management
+let lastToastId: string | number | null = null;
+let toastTimeout: NodeJS.Timeout | null = null;
+
+const showToast = {
   success: (title: string, description: string) => {
-    const isImportantSuccess = title.includes('Position Created') || title.includes('Successfully');
+    if (lastToastId) toast.dismiss(lastToastId);
+    if (toastTimeout) clearTimeout(toastTimeout);
     
-    if (!isImportantSuccess && lastToastId) {
-      toast.dismiss(lastToastId);
-    }
-    
-    if (toastTimeout) {
-      clearTimeout(toastTimeout);
-    }
-    
-    const delay = isImportantSuccess ? 0 : 100;
-    const duration = isImportantSuccess ? TIMING_CONSTANTS.SUCCESS_TOAST_DURATION : TIMING_CONSTANTS.REGULAR_TOAST_DURATION;
-    
-    const showToast = () => {
-      lastToastId = toast.success(title, {
-        description,
-        duration,
-        style: {
-          backgroundColor: '#22c55e',
-          color: '#ffffff',
-          border: '1px solid #16a34a',
-          borderRadius: '12px',
-          fontSize: '14px',
-          fontFamily: 'var(--font-sans)',
-          boxShadow: '0 8px 32px rgba(34, 197, 94, 0.3)',
-          zIndex: 9999,
-          position: 'fixed',
-        },
-        className: 'custom-success-toast',
-        position: 'top-center',
-      });
-    };
-    
-    if (delay > 0) {
-      toastTimeout = setTimeout(showToast, delay);
-    } else {
-      showToast();
-    }
+    lastToastId = toast.success(title, {
+      description,
+      duration: TIMING.SUCCESS_DURATION,
+      style: {
+        backgroundColor: '#22c55e',
+        color: '#ffffff',
+        border: '1px solid #16a34a',
+        borderRadius: '12px'
+      }
+    });
   },
   error: (title: string, description: string) => {
-    if (lastToastId) {
-      toast.dismiss(lastToastId);
-    }
+    if (lastToastId) toast.dismiss(lastToastId);
     
     lastToastId = toast.error(title, {
       description,
-      duration: TIMING_CONSTANTS.ERROR_TOAST_DURATION,
+      duration: TIMING.ERROR_DURATION,
       style: {
         backgroundColor: '#ef4444',
         color: '#ffffff',
         border: '1px solid #dc2626',
-        borderRadius: '12px',
-        fontSize: '14px',
-        fontFamily: 'var(--font-sans)',
-        boxShadow: '0 8px 32px rgba(239, 68, 68, 0.3)',
-        zIndex: 9999,
-        position: 'fixed',
-      },
-      className: 'custom-error-toast',
-      position: 'top-center',
+        borderRadius: '12px'
+      }
     });
   },
   warning: (title: string, description: string) => {
-    if (lastToastId) {
-      toast.dismiss(lastToastId);
-    }
+    if (lastToastId) toast.dismiss(lastToastId);
     
     lastToastId = toast.warning(title, {
       description,
-      duration: TIMING_CONSTANTS.WARNING_TOAST_DURATION,
+      duration: TIMING.ERROR_DURATION,
       style: {
         backgroundColor: '#f59e0b',
         color: '#ffffff',
         border: '1px solid #d97706',
-        borderRadius: '12px',
-        fontSize: '14px',
-        fontFamily: 'var(--font-sans)',
-        boxShadow: '0 8px 32px rgba(245, 158, 11, 0.3)',
-        zIndex: 9999,
-        position: 'fixed',
-      },
-      className: 'custom-warning-toast',
-      position: 'top-center',
+        borderRadius: '12px'
+      }
     });
-  },
+  }
 };
 
 const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({ 
@@ -165,7 +117,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const { service: positionService } = useMeteoraPositionService();
   
   // State management
-  const [btcAmount, setBtcAmount] = useState('');
+  const [amount, setAmount] = useState('');
   const [selectedStrategy, setSelectedStrategy] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
@@ -178,22 +130,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const [userTokenBalance, setUserTokenBalance] = useState<number>(0);
   
   // UI state
-  const [showStrategyDetails, setShowStrategyDetails] = useState(false);
-  const [showCostBreakdown, setShowCostBreakdown] = useState(false);
-  const [showAccountBalance, setShowAccountBalance] = useState(false);
-  const [showPoolInfo, setShowPoolInfo] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [activePercentage, setActivePercentage] = useState<number | null>(null);
+  const [isUpdatingAmount, setIsUpdatingAmount] = useState(false);
 
   // Refs
   const findingBinsRef = useRef(false);
   const poolAddressRef = useRef<string | null>(null);
 
-  // State for percentage buttons
-  const [activePercentage, setActivePercentage] = useState<number | null>(null);
-  const [isUpdatingAmount, setIsUpdatingAmount] = useState(false);
-
   // Get token names from pool
   const getTokenNames = () => {
-    if (!pool) return { tokenX: 'zBTC', tokenY: 'SOL' };
+    if (!pool) return { tokenX: 'BTC', tokenY: 'SOL' };
     const [tokenX, tokenY] = pool.name.split('-');
     return { 
       tokenX: tokenX.replace('WBTC', 'wBTC'), 
@@ -202,23 +149,60 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   };
 
   const { tokenX } = getTokenNames();
-  const poolBinStep = useMemo(() => {
-    if (!pool || !pool.binStep || pool.binStep === 'N/A') return 10;
-    return parseInt(pool.binStep);
-  }, [pool]);
+
+  // Simplified strategy options
+  const strategyOptions: StrategyOption[] = useMemo(() => {
+    if (existingBinRanges.length === 0) return [];
+    
+    const strategies = {
+      conservative: {
+        icon: '🛡️',
+        label: 'Conservative',
+        subtitle: 'Lower risk, steady returns',
+        description: 'Best for long-term holders'
+      },
+      moderate: {
+        icon: '⚖️', 
+        label: 'Moderate',
+        subtitle: 'Balanced risk and returns',
+        description: 'Good for most users'
+      },
+      aggressive: {
+        icon: '🚀',
+        label: 'Aggressive', 
+        subtitle: 'Higher risk, higher returns',
+        description: 'For experienced traders'
+      }
+    };
+    
+    const style = strategies[actualPortfolioStyle.toLowerCase() as keyof typeof strategies] || strategies.moderate;
+    
+    return [{
+      id: 'selected-strategy',
+      ...style,
+      estimatedCost: 0.06,
+      riskLevel: actualPortfolioStyle.toLowerCase() as 'low' | 'medium' | 'high',
+      isDefault: true
+    }];
+  }, [actualPortfolioStyle, existingBinRanges]);
+
+  // Set default strategy
+  useEffect(() => {
+    if (strategyOptions.length > 0 && !selectedStrategy) {
+      setSelectedStrategy(strategyOptions[0].id);
+    }
+  }, [strategyOptions, selectedStrategy]);
+
+  const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
 
   // Find existing bin ranges
   const findExistingBinRanges = useCallback(async (poolAddress: string) => {
-    if (findingBinsRef.current || !poolAddress) {
-      console.log('Skipping bin range request - already in progress or no pool address');
-      return;
-    }
+    if (findingBinsRef.current || !poolAddress) return;
 
     const cached = binRangesCache.get(poolAddress);
     const now = Date.now();
     
     if (cached && (now - cached.timestamp) < CACHE_DURATION) {
-      console.log('Using cached bin ranges for pool:', poolAddress.substring(0, 8));
       setExistingBinRanges(cached.data);
       setCurrentBinId(cached.activeBinId);
       setBinRangesLoaded(true);
@@ -230,8 +214,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     setBinRangesLoaded(false);
     
     try {
-      console.log('Fetching fresh bin ranges for pool:', poolAddress.substring(0, 8));
-      
       const dlmmPool = await dlmmService.initializePool(poolAddress);
       const activeBin = await dlmmPool.getActiveBin();
       setCurrentBinId(activeBin.binId);
@@ -242,19 +224,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       
       if (existingRanges.length > 0) {
         finalRanges = existingRanges;
-        console.log(`Found ${existingRanges.length} existing bin ranges (60-69 bins)`);
       } else {
-        // Fallback range using 60-69 bin strategy
         const fallbackRange: ExistingBinRange = {
           minBinId: activeBin.binId - 30,
           maxBinId: activeBin.binId + 30,
           existingBins: Array.from({length: 61}, (_, i) => activeBin.binId - 30 + i),
           liquidityDepth: 61,
           isPopular: false,
-          description: 'Conservative 60-bin range around current price (maximum efficiency)'
+          description: 'Safe price range around current market price'
         };
         finalRanges = [fallbackRange];
-        console.log('Using fallback 60-bin range around active bin:', activeBin.binId);
       }
       
       setExistingBinRanges(finalRanges);
@@ -267,7 +246,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       });
       
     } catch (error) {
-      console.error('Error finding existing bins:', error);
+      console.error('Error finding price ranges:', error);
       
       const fallbackRange: ExistingBinRange = {
         minBinId: currentBinId ? currentBinId - 30 : 0,
@@ -275,7 +254,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         existingBins: currentBinId ? Array.from({length: 61}, (_, i) => currentBinId - 30 + i) : Array.from({length: 61}, (_, i) => i),
         liquidityDepth: 61,
         isPopular: false,
-        description: 'Default 60-bin range (maximum efficiency, position rent only)'
+        description: 'Safe price range around current market price'
       };
       setExistingBinRanges([fallbackRange]);
       setBinRangesLoaded(true);
@@ -301,7 +280,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       setCurrentBinId(null);
       setBalanceInfo(null);
       setValidationError('');
-      setBtcAmount('');
+      setAmount('');
       setSelectedStrategy('');
       setUserTokenBalance(0);
       setActivePercentage(null);
@@ -319,81 +298,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       }
     }
   }, [isOpen]);
-
-  // Strategy options with 60-69 bins
-  const strategyOptions: StrategyOption[] = useMemo(() => {
-    if (existingBinRanges.length === 0) return [];
-    
-    const riskLevel = poolBinStep <= 5 ? 'high' : poolBinStep <= 15 ? 'medium' : 'low';
-    
-    // Updated style info based on portfolio preference (60-69 bins)
-    let styleInfo: { icon: string; label: string; color: string; binRange: string; expectedBins: number };
-    
-    switch (actualPortfolioStyle.toLowerCase()) {
-      case 'conservative':
-        styleInfo = { 
-          icon: '🛡️', 
-          label: 'Conservative', 
-          color: 'text-green-400',
-          binRange: '65-69 bins',
-          expectedBins: 67
-        };
-        break;
-      case 'moderate':
-        styleInfo = { 
-          icon: '⚖️', 
-          label: 'Moderate', 
-          color: 'text-blue-400',
-          binRange: '62-65 bins',
-          expectedBins: 63
-        };
-        break;
-      case 'aggressive':
-        styleInfo = { 
-          icon: '🚀', 
-          label: 'Aggressive', 
-          color: 'text-red-400',
-          binRange: '60-62 bins',
-          expectedBins: 61
-        };
-        break;
-      default:
-        styleInfo = { 
-          icon: '⚖️', 
-          label: 'Moderate', 
-          color: 'text-blue-400',
-          binRange: '62-65 bins',
-          expectedBins: 63
-        };
-    }
-    
-    const estimatedCost = 0.057;
-    
-    return [
-      {
-        id: 'existing-bins-primary',
-        label: `${styleInfo.label} Position (${styleInfo.binRange})`,
-        description: `Maximum capital efficiency ${actualPortfolioStyle} position using ${styleInfo.binRange} existing price bins - leverages near-full bin array capacity for optimal fee capture across the widest profitable price range`,
-        binStep: poolBinStep,
-        estimatedCost,
-        riskLevel,
-        portfolioStyle: actualPortfolioStyle,
-        strategy: 'oneSided',
-        isDefault: true,
-        binRange: styleInfo.binRange,
-        expectedBins: styleInfo.expectedBins
-      }
-    ];
-  }, [actualPortfolioStyle, poolBinStep, existingBinRanges]);
-
-  // Set default strategy
-  useEffect(() => {
-    if (strategyOptions.length > 0 && !selectedStrategy) {
-      setSelectedStrategy(strategyOptions[0].id);
-    }
-  }, [strategyOptions, selectedStrategy]);
-
-  const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
 
   // Fetch user's token balance
   const fetchUserTokenBalance = useCallback(async () => {
@@ -435,56 +339,42 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
   // Handle percentage buttons
   const handlePercentageClick = useCallback((percentage: number) => {
-    console.log('Percentage clicked:', percentage, 'User balance:', userTokenBalance);
-    
-    if (isUpdatingAmount) {
-      console.log('Update in progress, ignoring click');
-      return;
-    }
+    if (isUpdatingAmount) return;
     
     if (userTokenBalance <= 0) {
-      console.log('No token balance available');
-      showCustomToast.warning('No Balance', 'You don\'t have any tokens to allocate.');
+      showToast.warning('No Balance', 'You don&apos;t have any tokens to add.');
       return;
     }
     
     setIsUpdatingAmount(true);
     setActivePercentage(percentage);
     
-    const amount = (userTokenBalance * percentage / 100).toFixed(6);
-    console.log(`Setting ${percentage}% of balance:`, amount);
-    setBtcAmount(amount);
+    const newAmount = (userTokenBalance * percentage / 100).toFixed(6);
+    setAmount(newAmount);
     
-    showCustomToast.success('Amount Updated', `Set to ${percentage}% of your balance: ${amount} ${tokenX}`);
+    showToast.success('Amount Updated', `Set to ${percentage}% of your balance`);
     
     setTimeout(() => {
       setIsUpdatingAmount(false);
     }, 300);
-  }, [userTokenBalance, tokenX, isUpdatingAmount]);
+  }, [userTokenBalance, isUpdatingAmount]);
 
   // Handle max button
   const handleMaxClick = useCallback(() => {
-    console.log('Max clicked, User balance:', userTokenBalance);
-    
-    if (isUpdatingAmount) {
-      console.log('Update in progress, ignoring click');
-      return;
-    }
+    if (isUpdatingAmount) return;
     
     if (userTokenBalance <= 0) {
-      console.log('No token balance available for MAX');
-      showCustomToast.warning('No Balance', 'You don\'t have any tokens to allocate.');
+      showToast.warning('No Balance', 'You don&apos;t have any tokens to add.');
       return;
     }
     
     setIsUpdatingAmount(true);
     setActivePercentage(100);
     
-    const amount = userTokenBalance.toFixed(6);
-    console.log('Setting max amount:', amount);
-    setBtcAmount(amount);
+    const newAmount = userTokenBalance.toFixed(6);
+    setAmount(newAmount);
     
-    showCustomToast.success('Amount Updated', `Set to maximum: ${amount} ${tokenX}`);
+    showToast.success('Amount Updated', `Set to maximum: ${newAmount} ${tokenX}`);
     
     setTimeout(() => {
       setIsUpdatingAmount(false);
@@ -493,7 +383,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
   // Balance checking
   const checkUserBalances = useCallback(async () => {
-    if (!publicKey || !pool || !btcAmount || parseFloat(btcAmount) <= 0 || !selectedStrategyOption) return;
+    if (!publicKey || !pool || !amount || parseFloat(amount) <= 0 || !selectedStrategyOption) return;
 
     setIsCheckingBalance(true);
     setValidationError('');
@@ -522,40 +412,40 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
       if (!hasEnoughSol) {
         setValidationError(
-          `Insufficient SOL balance. You need ${shortfall.toFixed(4)} more SOL to complete this transaction.`
+          `You need ${shortfall.toFixed(3)} more SOL to complete this transaction.`
         );
       }
 
     } catch (error) {
       console.error('Error checking balances:', error);
-      setValidationError('Unable to verify account balances. Please try again.');
+      setValidationError('Unable to check account balances. Please try again.');
     } finally {
       setIsCheckingBalance(false);
     }
-  }, [publicKey, pool, btcAmount, selectedStrategyOption]);
+  }, [publicKey, pool, amount, selectedStrategyOption]);
 
   useEffect(() => {
-    if (btcAmount && parseFloat(btcAmount) > 0 && publicKey && pool && selectedStrategyOption) {
+    if (amount && parseFloat(amount) > 0 && publicKey && pool && selectedStrategyOption) {
       checkUserBalances();
     } else {
       setBalanceInfo(null);
       setValidationError('');
     }
-  }, [btcAmount, publicKey, pool, selectedStrategyOption, checkUserBalances]);
+  }, [amount, publicKey, pool, selectedStrategyOption, checkUserBalances]);
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     if (/^[0-9]*\.?[0-9]*$/.test(value) || value === '') {
-      setBtcAmount(value);
+      setAmount(value);
     }
   };
 
   // Main transaction handler
   const handleAddLiquidity = async () => {
-    if (!pool || !publicKey || !btcAmount || parseFloat(btcAmount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
+    if (!pool || !publicKey || !amount || parseFloat(amount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
-      showCustomToast.error('Insufficient SOL Balance', 
+      showToast.error('Not Enough SOL', 
         validationError || 'You need more SOL to complete this transaction.'
       );
       return;
@@ -565,19 +455,9 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     
     try {
       const decimals = 8;
-      const bnAmount = new BN(parseFloat(btcAmount) * Math.pow(10, decimals));
+      const bnAmount = new BN(parseFloat(amount) * Math.pow(10, decimals));
       
       const selectedRange = existingBinRanges[0];
-      
-      console.log(`Creating ${userPortfolioStyle} position using 60-69 EXISTING bins:`, {
-        poolBinStep,
-        userStyle: userPortfolioStyle,
-        range: `${selectedRange.minBinId} to ${selectedRange.maxBinId}`,
-        existingBins: selectedRange.existingBins.length,
-        expectedBins: selectedStrategyOption.expectedBins,
-        amount: btcAmount,
-        token: tokenX
-      });
       
       const result = await positionService.createPositionWithExistingBins({
         poolAddress: pool.address,
@@ -590,117 +470,48 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         useAutoFill: false
       }, selectedRange);
       
-      console.log('About to send transaction(s)...');
       const transactionSignatures: string[] = [];
       
       if (Array.isArray(result.transaction)) {
-        console.log(`Sending ${result.transaction.length} transactions...`);
         for (let i = 0; i < result.transaction.length; i++) {
           const tx = result.transaction[i];
-          console.log(`Sending transaction ${i + 1}/${result.transaction.length}...`);
           const signature = await sendTransaction(tx, dlmmService.connection, {
             signers: [result.positionKeypair]
           });
-          console.log(`Transaction ${i + 1} signature:`, signature);
           transactionSignatures.push(signature);
         }
       } else {
-        console.log('Sending single transaction...');
         const signature = await sendTransaction(result.transaction, dlmmService.connection, {
           signers: [result.positionKeypair]
         });
-        console.log('Transaction signature:', signature);
         transactionSignatures.push(signature);
       }
       
-      console.log('All transactions completed successfully!');
-      console.log('Total signatures:', transactionSignatures);
+      setTimeout(() => {
+        showToast.success('Success!', `Your ${amount} ${tokenX} has been added to the pool. You&apos;ll start earning fees from trading activity.`);
+      }, TIMING.TRANSACTION_DELAY);
       
       setTimeout(() => {
-        console.log('Showing success toast...');
-        
-        const txSignature = transactionSignatures[0];
-        if (!txSignature) {
-          console.error('No transaction signature available for Solscan link');
-          return;
-        }
-        
-        const toastId = toast.custom(
-          (t) => (
-            <div className="bg-[#22c55e] text-white border border-[#16a34a] rounded-xl p-4 shadow-2xl max-w-md w-full">
-              <div className="flex items-start gap-3">
-                <div className="flex-shrink-0 mt-0.5">
-                  <div className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-lg mb-1">🎉 Maximum Efficiency Position Created!</div>
-                  <div className="text-sm text-white/90 mb-3">
-                    {actualPortfolioStyle.toUpperCase()} {tokenX} position with {selectedStrategyOption.expectedBins} bins created successfully!
-                    <br />
-                    <span className="font-mono text-xs bg-white/10 px-2 py-1 rounded mt-1 inline-block">
-                      TX: {txSignature.slice(0, 12)}...
-                    </span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => toast.dismiss(String(t))}
-                  className="flex-shrink-0 text-white/60 hover:text-white transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ),
-          {
-            duration: TIMING_CONSTANTS.SUCCESS_TOAST_DURATION,
-            position: 'top-center',
-            style: {
-              background: 'transparent',
-              border: 'none',
-              boxShadow: 'none',
-            }
-          }
-        );
-        
-        lastToastId = toastId;
-      }, TIMING_CONSTANTS.TRANSACTION_CONFIRMATION_DELAY);
-      
-      setTimeout(() => {
-        console.log('Closing modal...');
         onClose();
-        setBtcAmount('');
+        setAmount('');
         setActivePercentage(null);
-      }, TIMING_CONSTANTS.MODAL_CLOSE_DELAY);
+      }, TIMING.MODAL_CLOSE_DELAY);
       
     } catch (error) {
       console.error('Error adding liquidity:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
       if (errorMessage.includes('insufficient funds') || errorMessage.includes('insufficient lamports')) {
-        showCustomToast.error('Insufficient SOL Balance', 
-          `You need SOL for position rent: ${selectedStrategyOption.estimatedCost.toFixed(3)} SOL (refundable). No bin creation costs with 60-69 bin strategy!`
+        showToast.error('Not Enough SOL', 
+          `You need about ${selectedStrategyOption.estimatedCost.toFixed(2)} SOL to start earning.`
         );
       } else if (errorMessage.includes('User rejected') || errorMessage.includes('user rejected') || errorMessage.includes('User denied') || errorMessage.includes('cancelled')) {
-        showCustomToast.warning('Transaction Cancelled', 
+        showToast.warning('Transaction Cancelled', 
           'You cancelled the transaction. Your funds are safe.'
         );
-      } else if (errorMessage.includes('Transaction simulation failed')) {
-        showCustomToast.error('Transaction Failed', 
-          'Transaction simulation failed. The selected 60-69 bin range might be full or restricted.'
-        );
-      } else if (errorMessage.includes('Network') || errorMessage.includes('network')) {
-        showCustomToast.error('Network Error', 
-          'Network connection issue. Please check your connection and try again.'
-        );
       } else {
-        showCustomToast.error('Position Creation Failed', 
-          `Failed to create ${actualPortfolioStyle} maximum efficiency position: ${errorMessage}`
+        showToast.error('Transaction Failed', 
+          'Something went wrong. Please try again.'
         );
       }
     } finally {
@@ -708,152 +519,36 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     }
   };
 
-  const getBinStepDescription = (binStep: number) => {
-    const baseDescription = binStep <= 5 
-      ? 'Very high precision (0.05% increments) - maximum fee capture'
-      : binStep <= 15 
-        ? 'Standard precision (0.1-1.5% increments) - balanced approach'
-        : 'Conservative precision (5%+ increments) - stable and predictable';
-        
-    return `${baseDescription}. Using 60-69 bins maximizes your fee capture across the widest profitable price range.`;
+  const getRiskColor = (risk: string) => {
+    switch (risk) {
+      case 'conservative': return 'text-green-400';
+      case 'moderate': return 'text-blue-400';  
+      case 'aggressive': return 'text-orange-400';
+      default: return 'text-blue-400';
+    }
   };
   
   return (
     <Dialog open={isOpen && !!pool} onOpenChange={onClose}>
       <DialogContent className="bg-[#161616] border-border text-white max-w-lg mx-auto max-h-[90vh] overflow-y-auto">
         <DialogHeader className="space-y-3">
-          <DialogTitle className="text-white text-xl">Add {tokenX} Liquidity (Max Efficiency)</DialogTitle>
+          <DialogTitle className="text-white text-xl">Add Liquidity</DialogTitle>
           <DialogDescription className="text-sm text-sub-text">
-            Using your {actualPortfolioStyle} strategy with 60-69 existing bins for maximum capital efficiency
+            Start earning fees from {pool?.name} trading activity
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-6 mt-6">
-          {/* Pool Information */}
-          <div className="bg-[#0f0f0f] border border-border rounded-lg">
-            <div 
-              className="p-4 cursor-pointer flex items-center justify-between"
-              onClick={() => setShowPoolInfo(!showPoolInfo)}
-            >
-              <div className="flex items-center gap-2">
-                <Info className="h-5 w-5 flex-shrink-0 text-primary" />
-                <span className="text-sm text-sub-text font-medium">Pool Information</span>
-                <span className="text-primary font-medium text-xs">
-                  {pool?.name} • BS-{poolBinStep}
-                </span>
-              </div>
-              {showPoolInfo ? (
-                <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
-              )}
-            </div>
-            
-            {showPoolInfo && (
-              <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                <div className="space-y-2 border-t border-border pt-4">
-                  <div className="flex justify-between items-center text-sm">
-                    <span>Pool:</span>
-                    <span className="text-white font-medium">{pool?.name}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span>Bin Step:</span>
-                    <span className="text-primary font-medium">{poolBinStep}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span>Strategy:</span>
-                    <span className="text-green-400 font-medium">✅ 60-69 Bins Max Efficiency</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Existing Bin Ranges Info */}
-          {isLoadingBins ? (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4 text-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary mx-auto mb-2" />
-              <p className="text-sm text-sub-text">Finding 60-69 bin ranges for maximum efficiency...</p>
-            </div>
-          ) : existingBinRanges.length > 0 && (
-            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className="h-5 w-5 text-green-400" />
-                <span className="text-green-400 font-medium">Maximum Efficiency Bins Found</span>
-              </div>
-              <p className="text-sm text-white">
-                Using range: {existingBinRanges[0]?.description}
-              </p>
-              <p className="text-xs text-green-300 mt-1">
-                🚀 60-69 bins strategy - Maximum capital efficiency with existing infrastructure
-              </p>
-            </div>
-          )}
-
-          {/* Balance Display - FIXED VERSION */}
-          {balanceInfo && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg">
-              <div 
-                className="p-4 cursor-pointer flex items-center justify-between"
-                onClick={() => setShowAccountBalance(!showAccountBalance)}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-sub-text font-medium">💰 Account Balance</span>
-                  <span className={`font-medium text-xs ${balanceInfo.hasEnoughSol ? 'text-green-400' : 'text-red-400'}`}>
-                    {balanceInfo.hasEnoughSol ? '✓ Sufficient' : '⚠️ Insufficient'}
-                  </span>
-                </div>
-                {showAccountBalance ? (
-                  <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
-                )}
-              </div>
-              
-              {showAccountBalance && (
-                <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                  <div className="space-y-2 border-t border-border pt-4">
-                    <div className="flex justify-between items-center text-sm">
-                      <span>SOL Balance:</span>
-                      <span className={balanceInfo.hasEnoughSol ? 'text-green-400 font-medium' : 'text-red-400 font-medium'}>
-                        {balanceInfo.solBalance.toFixed(4)} SOL
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span>SOL Needed:</span>
-                      <span className="text-white font-medium">{balanceInfo.estimatedSolNeeded.toFixed(4)} SOL</span>
-                    </div>
-                    {/* 🎯 THE FIX: Explicit check prevents rendering 0 */}
-                    {balanceInfo.shortfall > 0 && (
-                      <div className="flex justify-between items-center text-sm">
-                        <span>Shortfall:</span>
-                        <span className="text-red-400 font-medium">-{balanceInfo.shortfall.toFixed(4)} SOL</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Validation Error */}
-          {validationError && validationError.length > 0 && (
-            <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-red-200">{validationError}</div>
-            </div>
-          )}
-
           {/* Amount Input */}
           <div className="space-y-3">
             <label className="text-sm text-sub-text block font-medium">
-              {tokenX} Amount to Provide (60-69 Bins Strategy)
+              How much {tokenX} do you want to add?
             </label>
             
             {/* Token Balance Display */}
             {publicKey && (
               <div className="flex justify-between items-center text-xs text-sub-text">
-                <span>Available Balance:</span>
+                <span>Available:</span>
                 <span className="font-medium">
                   {userTokenBalance.toFixed(6)} {tokenX}
                 </span>
@@ -863,7 +558,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             <div className="relative">
               <input
                 type="text"
-                value={btcAmount}
+                value={amount}
                 onChange={handleAmountChange}
                 placeholder="0.0"
                 className="w-full bg-[#0f0f0f] border border-border rounded-lg p-4 text-white pr-20 text-lg font-medium"
@@ -891,7 +586,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     activePercentage === 25
                       ? 'bg-primary/20 border-primary text-primary font-medium'
                       : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
-                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  }`}
                 >
                   25%
                 </Button>
@@ -905,7 +600,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     activePercentage === 50
                       ? 'bg-primary/20 border-primary text-primary font-medium'
                       : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
-                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  }`}
                 >
                   50%
                 </Button>
@@ -919,7 +614,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     activePercentage === 75
                       ? 'bg-primary/20 border-primary text-primary font-medium'
                       : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
-                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  }`}
                 >
                   75%
                 </Button>
@@ -933,7 +628,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
                     activePercentage === 100
                       ? 'bg-primary/20 border-primary text-primary font-medium'
                       : 'bg-transparent border-border hover:border-green-500 hover:bg-green-500/20 hover:text-green-400 text-white'
-                  } ${isUpdatingAmount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  }`}
                 >
                   MAX
                 </Button>
@@ -945,133 +640,140 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
               <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-3 mt-3">
                 <div className="flex items-center gap-2 text-yellow-200 text-sm">
                   <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                  <span>No {tokenX} balance found in your wallet</span>
+                  <span>No {tokenX} found in your wallet</span>
                 </div>
               </div>
             )}
           </div>
 
           {/* Strategy Display */}
-          <div className="space-y-4">
-            <label className="text-sm text-sub-text block font-medium">
-              🚀 Your Maximum Efficiency Position Strategy
-            </label>
-            
-            <div className="grid gap-3">
-              {strategyOptions.map((option) => (
-                <div 
-                  key={option.id}
-                  className="p-4 border border-primary bg-primary/10 rounded-lg"
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
+          {strategyOptions.length > 0 && (
+            <div className="space-y-4">
+              <label className="text-sm text-sub-text block font-medium">
+                Your Strategy
+              </label>
+              
+              <div className="p-4 border border-primary bg-primary/10 rounded-lg">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-2xl">{selectedStrategyOption?.icon}</span>
+                      <div>
                         <div className="font-medium text-white text-sm">
-                          {option.label}
+                          {selectedStrategyOption?.label}
                         </div>
-                        <div className="px-2 py-1 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-500/30 whitespace-nowrap">
-                          MAX EFFICIENCY
+                        <div className={`text-xs ${getRiskColor(actualPortfolioStyle)}`}>
+                          {selectedStrategyOption?.subtitle}
                         </div>
-                      </div>
-                      <div className="text-xs text-sub-text mb-2">
-                        {option.description}
-                      </div>
-                      <div className="flex items-center gap-4 text-xs flex-wrap">
-                        <span className="whitespace-nowrap">Bin Step: {option.binStep}</span>
-                        <span className="whitespace-nowrap">Expected Bins: {option.expectedBins}</span>
-                        <span className="whitespace-nowrap">Cost: ~{option.estimatedCost.toFixed(3)} SOL</span>
-                        <span className="whitespace-nowrap">Strategy: 60-69 Bins Maximum</span>
                       </div>
                     </div>
-                    <CheckCircle className="h-5 w-5 text-primary flex-shrink-0 ml-2" />
+                    <div className="text-xs text-sub-text">
+                      {selectedStrategyOption?.description}
+                    </div>
                   </div>
+                  <CheckCircle className="h-5 w-5 text-primary flex-shrink-0 ml-2" />
                 </div>
-              ))}
+              </div>
+            </div>
+          )}
+
+          {/* Cost Information */}
+          <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-sub-text">Cost to start:</span>
+              <span className="text-white font-medium">
+                ~{selectedStrategyOption ? selectedStrategyOption.estimatedCost.toFixed(2) : '0.06'} SOL
+              </span>
+            </div>
+            <div className="text-xs text-green-400 mt-1">
+              You get this back when you exit
             </div>
           </div>
 
-          {/* Strategy Details */}
-          {selectedStrategyOption && (
-            <div className="bg-[#0f0f0f] border border-border rounded-lg">
-              <div 
-                className="p-4 cursor-pointer flex items-center justify-between"
-                onClick={() => setShowStrategyDetails(!showStrategyDetails)}
-              >
-                <div className="flex items-center gap-2">
-                  <Info className="h-5 w-5 flex-shrink-0 text-primary" />
-                  <span className="text-sm text-sub-text font-medium">
-                    Strategy Details (60-69 Bins Max Efficiency)
-                  </span>
-                </div>
-                {showStrategyDetails ? (
-                  <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
-                )}
+          {/* Balance Check Results */}
+          {balanceInfo && (
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-sub-text">Your SOL Balance:</span>
+                <span className={`font-medium ${balanceInfo.hasEnoughSol ? 'text-green-400' : 'text-red-400'}`}>
+                  {balanceInfo.solBalance.toFixed(3)} SOL
+                </span>
               </div>
-              
-              {showStrategyDetails && (
-                <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                  <div className="text-sm text-sub-text space-y-2 border-t border-border pt-4">
-                    <div>
-                      <div className="font-medium text-white mb-2">Position Details:</div>
-                      <div>• Bin Step {poolBinStep}: {getBinStepDescription(poolBinStep)}</div>
-                      <div>• Portfolio Style: {actualPortfolioStyle.toUpperCase()} - optimized for maximum capital efficiency</div>
-                      <div>• Position Type: One-sided {tokenX} with {selectedStrategyOption.expectedBins} bins coverage</div>
-                      <div>• Range: Uses maximum existing price bin coverage (near protocol limit of 69)</div>
-                      <div>• ✅ Capital Efficiency: Maximum possible fee capture with existing infrastructure</div>
-                      <div>• 🎯 Fee Optimization: Covers widest profitable price range for sustained earnings</div>
-                      <div>• 🛡️ Safety: Lower risk through diversified price exposure across many bins</div>
-                    </div>
-                  </div>
+              {balanceInfo.shortfall > 0 && (
+                <div className="flex justify-between items-center text-sm mt-2">
+                  <span className="text-sub-text">Need:</span>
+                  <span className="text-red-400 font-medium">
+                    {balanceInfo.shortfall.toFixed(3)} more SOL
+                  </span>
                 </div>
               )}
             </div>
           )}
 
-          {/* Cost Breakdown */}
+          {/* Validation Error */}
+          {validationError && (
+            <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-red-200">{validationError}</div>
+            </div>
+          )}
+
+          {/* Loading States */}
+          {isLoadingBins && (
+            <div className="bg-[#0f0f0f] border border-border rounded-lg p-4 text-center">
+              <Loader2 className="h-5 w-5 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-sm text-sub-text">Finding safe price ranges...</p>
+            </div>
+          )}
+
+          {/* Success State */}
+          {existingBinRanges.length > 0 && binRangesLoaded && (
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle className="h-5 w-5 text-green-400" />
+                <span className="text-green-400 font-medium">Ready to earn</span>
+              </div>
+              <p className="text-sm text-white">
+                Safe price range found. You&apos;ll start earning fees when people trade this pair.
+              </p>
+            </div>
+          )}
+
+          {/* Advanced Details (Collapsible) */}
           <div className="bg-[#0f0f0f] border border-border rounded-lg">
             <div 
               className="p-4 cursor-pointer flex items-center justify-between"
-              onClick={() => setShowCostBreakdown(!showCostBreakdown)}
+              onClick={() => setShowDetails(!showDetails)}
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm text-sub-text font-medium">💰 Cost Breakdown (Max Efficiency)</span>
-                <span className="text-primary font-medium">
-                  ~{selectedStrategyOption ? selectedStrategyOption.estimatedCost.toFixed(3) : '0.057'} SOL
-                </span>
+                <Info className="h-5 w-5 flex-shrink-0 text-primary" />
+                <span className="text-sm text-sub-text font-medium">How it works</span>
               </div>
-              {showCostBreakdown ? (
+              {showDetails ? (
                 <ChevronUp className="h-4 w-4 text-primary flex-shrink-0" />
               ) : (
                 <ChevronDown className="h-4 w-4 text-primary flex-shrink-0" />
               )}
             </div>
             
-            {showCostBreakdown && selectedStrategyOption && (
+            {showDetails && (
               <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                <div className="space-y-2 text-sm border-t border-border pt-4">
-                  <div className="flex justify-between">
-                    <span>Position Rent (refundable):</span>
-                    <span className="text-green-400 font-medium">{selectedStrategyOption.estimatedCost.toFixed(3)} SOL</span>
+                <div className="space-y-3 border-t border-border pt-4 text-sm text-sub-text">
+                  <div>
+                    <div className="font-medium text-white mb-1">What happens next:</div>
+                    <div>• Your {tokenX} will be added to the {pool?.name} trading pool</div>
+                    <div>• You&apos;ll automatically earn fees when people trade this pair</div>
+                    <div>• You can withdraw your funds anytime</div>
+                    <div>• The ~0.06 SOL cost gets refunded when you exit</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Bin Creation Cost:</span>
-                    <span className="text-green-400 font-medium">FREE ✅</span>
+                  <div>
+                    <div className="font-medium text-white mb-1">Risk level: {selectedStrategyOption?.subtitle}</div>
+                    <div>• {actualPortfolioStyle === 'conservative' ? 'Lower risk with steady returns over time' : 
+                             actualPortfolioStyle === 'moderate' ? 'Balanced approach with moderate returns' :
+                             'Higher potential returns with increased risk'}</div>
+                    <div>• Your tokens may lose some value if prices move significantly</div>
+                    <div>• Trading fees help offset any potential losses</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Capital Efficiency:</span>
-                    <span className="text-green-400 font-medium">MAXIMUM 🎯</span>
-                  </div>
-                  <div className="flex justify-between items-center font-medium border-t border-border pt-2 mt-2">
-                    <span>Total Estimated:</span>
-                    <span className="text-primary">
-                      ~{selectedStrategyOption.estimatedCost.toFixed(3)} SOL
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-3 text-xs text-green-400">
-                  🚀 Maximum efficiency! Using {selectedStrategyOption.expectedBins} bins ({selectedStrategyOption.binRange}) provides the widest fee capture range possible while eliminating expensive bin creation costs. Your capital works across the maximum number of profitable price levels.
                 </div>
               </div>
             )}
@@ -1082,8 +784,8 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
           <Button 
             onClick={handleAddLiquidity} 
             disabled={
-              !btcAmount || 
-              parseFloat(btcAmount) <= 0 || 
+              !amount || 
+              parseFloat(amount) <= 0 || 
               isLoading || 
               isCheckingBalance ||
               isLoadingBins ||
@@ -1095,15 +797,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Creating Max Efficiency Position...
+                Adding Liquidity...
               </>
             ) : isLoadingBins ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Finding 60-69 Bins...
+                Loading...
               </>
             ) : (
-              `Create ${actualPortfolioStyle} Position (60-69 Bins)`
+              'Add Liquidity'
             )}
           </Button>
           <Button 
