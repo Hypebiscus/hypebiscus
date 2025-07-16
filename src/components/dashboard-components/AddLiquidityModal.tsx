@@ -12,6 +12,7 @@ import { FormattedPool } from '@/lib/utils/poolUtils';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { toast } from 'sonner';
+import { useTokenData } from '@/hooks/useTokenData';
 
 interface AddLiquidityModalProps {
   isOpen: boolean;
@@ -115,6 +116,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const { publicKey, sendTransaction } = useWallet();
   const { service: dlmmService } = useMeteoraDlmmService();
   const { service: positionService } = useMeteoraPositionService();
+  const tokens = useTokenData();
   
   // State management
   const [amount, setAmount] = useState('');
@@ -139,14 +141,14 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const poolAddressRef = useRef<string | null>(null);
 
   // Get token names from pool
-  const getTokenNames = () => {
+  const getTokenNames = useCallback(() => {
     if (!pool) return { tokenX: 'BTC', tokenY: 'SOL' };
     const [tokenX, tokenY] = pool.name.split('-');
     return { 
       tokenX: tokenX.replace('WBTC', 'wBTC'), 
       tokenY 
     };
-  };
+  }, [pool]);
 
   const { tokenX } = getTokenNames();
 
@@ -194,6 +196,70 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   }, [strategyOptions, selectedStrategy]);
 
   const selectedStrategyOption = strategyOptions.find(opt => opt.id === selectedStrategy);
+
+  // Fixed balance fetching function
+  const fetchUserTokenBalance = useCallback(async () => {
+    if (!publicKey || !pool) return;
+
+    try {
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+      );
+
+      // Extract the token symbol from pool name (e.g., "wBTC-SOL" -> "wBTC")
+      const { tokenX } = getTokenNames();
+      
+      // Define known token mint addresses on Solana mainnet
+      const TOKEN_MINTS: Record<string, string> = {
+        'wBTC': '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh',
+        'zBTC': 'zBTCug3er3tLyffELcvDNrKkCymbPWysGcWihESYfLg',
+        'cbBTC': 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
+        'SOL': 'So11111111111111111111111111111111111111112'
+      };
+
+      // Get the target token mint address
+      let targetTokenMint: string | undefined = TOKEN_MINTS[tokenX];
+      
+      // Fallback: if not in our predefined list, try to find via token registry
+      if (!targetTokenMint && tokens.length > 0) {
+        const tokenInfo = tokens.find(t => 
+          t.symbol === tokenX || 
+          t.symbol === tokenX.toUpperCase() ||
+          t.symbol === tokenX.toLowerCase()
+        );
+        targetTokenMint = tokenInfo?.address;
+      }
+
+      if (!targetTokenMint) {
+        console.warn(`Could not determine mint address for token: ${tokenX} in pool: ${pool.name}`);
+        setUserTokenBalance(0);
+        return;
+      }
+
+      // Get all token accounts for the user
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        publicKey,
+        { programId: TOKEN_PROGRAM_ID }
+      );
+
+      // Find the specific token account that matches our target mint
+      const targetAccount = tokenAccounts.value.find(account => {
+        const mintAddress = account.account.data.parsed.info.mint;
+        return mintAddress === targetTokenMint;
+      });
+
+      if (targetAccount) {
+        const balance = targetAccount.account.data.parsed.info.tokenAmount.uiAmount || 0;
+        setUserTokenBalance(balance);
+      } else {
+        setUserTokenBalance(0);
+      }
+
+    } catch (error) {
+      console.error('Error fetching token balance:', error);
+      setUserTokenBalance(0);
+    }
+  }, [publicKey, pool, tokens, getTokenNames]);
 
   // Find existing bin ranges
   const findExistingBinRanges = useCallback(async (poolAddress: string) => {
@@ -300,37 +366,6 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   }, [isOpen]);
 
   // Fetch user's token balance
-  const fetchUserTokenBalance = useCallback(async () => {
-    if (!publicKey || !pool) return;
-
-    try {
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
-      );
-
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-        publicKey,
-        { programId: TOKEN_PROGRAM_ID }
-      );
-
-      let tokenBalance = 0;
-      
-      for (const account of tokenAccounts.value) {
-        const parsedInfo = account.account.data.parsed.info;
-        const balance = parsedInfo.tokenAmount.uiAmount;
-        
-        if (balance > 0) {
-          tokenBalance = Math.max(tokenBalance, balance);
-        }
-      }
-
-      setUserTokenBalance(tokenBalance);
-    } catch (error) {
-      console.error('Error fetching token balance:', error);
-      setUserTokenBalance(0);
-    }
-  }, [publicKey, pool]);
-
   useEffect(() => {
     if (isOpen && publicKey && pool) {
       fetchUserTokenBalance();
@@ -342,7 +377,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     if (isUpdatingAmount) return;
     
     if (userTokenBalance <= 0) {
-      showToast.warning('No Balance', 'You don&apos;t have any tokens to add.');
+      showToast.warning('No Balance', `You don't have any ${tokenX} tokens to add.`);
       return;
     }
     
@@ -357,14 +392,14 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     setTimeout(() => {
       setIsUpdatingAmount(false);
     }, 300);
-  }, [userTokenBalance, isUpdatingAmount]);
+  }, [userTokenBalance, isUpdatingAmount, tokenX]);
 
   // Handle max button
   const handleMaxClick = useCallback(() => {
     if (isUpdatingAmount) return;
     
     if (userTokenBalance <= 0) {
-      showToast.warning('No Balance', 'You don&apos;t have any tokens to add.');
+      showToast.warning('No Balance', `You don't have any ${tokenX} tokens to add.`);
       return;
     }
     
@@ -488,7 +523,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       }
       
       setTimeout(() => {
-        showToast.success('Success!', `Your ${amount} ${tokenX} has been added to the pool. You&apos;ll start earning fees from trading activity.`);
+        showToast.success('Success!', `Your ${amount} ${tokenX} has been added to the pool. You'll start earning fees from trading activity.`);
       }, TIMING.TRANSACTION_DELAY);
       
       setTimeout(() => {
