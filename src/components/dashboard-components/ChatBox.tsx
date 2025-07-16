@@ -1130,6 +1130,7 @@ const ChatBox: React.FC = () => {
       <AddLiquidityModal
         isOpen={isAddLiquidityModalOpen}
         onClose={() => setIsAddLiquidityModalOpen(false)}
+        userPortfolioStyle={selectedPortfolioStyle}
         pool={selectedPool}
       />
 
