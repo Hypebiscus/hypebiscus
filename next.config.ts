@@ -2,8 +2,17 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // images: {
+  //   domains: ['coin-images.coingecko.com'],
+  // },
   images: {
-    domains: ['coin-images.coingecko.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'raw.githubusercontent.com',
+        pathname: '/**',
+      },
+    ],
   },
 };
 
