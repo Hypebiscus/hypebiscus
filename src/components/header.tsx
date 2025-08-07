@@ -10,7 +10,7 @@ import {
   NavigationMenuList,
   NavigationMenuTrigger,
 } from "@/components/ui/navigation-menu"
-import {Wallet, House, Lightning, List} from "@phosphor-icons/react"
+import {HouseIcon, LightningAIcon, WalletIcon, ListIcon} from "@phosphor-icons/react"
 import Link from "next/link";
 import Image from "next/image";
 
@@ -38,27 +38,27 @@ const Header = () => {
         <NavigationMenu className="lg:hidden block">
           <NavigationMenuList>
             <NavigationMenuItem>
-              <NavigationMenuTrigger className="flex items-center gap-2"><List /></NavigationMenuTrigger>
+              <NavigationMenuTrigger className="flex items-center gap-2"><ListIcon /></NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="flex flex-col gap-y-4 p-2">
                   <li>
                     <NavigationMenuLink asChild>
                       <Link href="/">
-                        <House className="text-primary"/> Home
+                        <HouseIcon className="text-primary"/> Home
                       </Link>
                     </NavigationMenuLink>
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
                       <Link href="/wallet">
-                        <Wallet className="text-primary"/> Wallet
+                        <WalletIcon className="text-primary"/> Wallet
                       </Link>
                     </NavigationMenuLink>
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
                       <Link href="/bridge">
-                        <Lightning className="text-primary"/> Bridge
+                        <LightningAIcon className="text-primary"/> Bridge
                       </Link>
                     </NavigationMenuLink>
                   </li>

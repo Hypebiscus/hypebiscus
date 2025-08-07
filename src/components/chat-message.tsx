@@ -16,6 +16,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, streamingMessage, is
   const isUser = message.role === "user";
 
   // Format message content with line breaks
+  // React automatically provides XSS protection for text content
   const formattedContent = message.content.split("\n").map((line, i) => (
     <React.Fragment key={i}>
       {line}

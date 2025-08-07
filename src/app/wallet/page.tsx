@@ -142,7 +142,10 @@ function usePositionActions(
         "Transaction successful",
         "Your position has been closed and your funds have been withdrawn."
       );
-      refreshPositions();
+      // Add delay to allow blockchain state to update before refreshing
+      setTimeout(() => {
+        refreshPositions();
+      }, 10000);
     } catch (err) {
       showToast.error("Failed to close position", (err as Error).message);
     } finally {
@@ -175,7 +178,10 @@ function usePositionActions(
           "Transaction successful",
           "Your fees have been claimed."
         );
-        refreshPositions();
+        // Add delay to allow blockchain state to update before refreshing
+        setTimeout(() => {
+          refreshPositions();
+        }, 10000);
       } else {
         showToast.error(
           "No fees to claim",
