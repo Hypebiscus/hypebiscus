@@ -1,8 +1,7 @@
-// src/components/dashboard-components/PortfolioStyleModal.tsx
 "use client";
 
 import React, { useState } from 'react';
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 interface PortfolioStyleModalProps {
@@ -15,7 +14,7 @@ type PortfolioStyle = {
   id: string;
   title: string;
   description: string;
-  icon?: string; // Optional icon character
+  icon?: string;
 };
 
 const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({ 
@@ -59,8 +58,14 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent>
-        <DialogTitle className='text-center text-2xl font-bold'>Choose Your Portfolio Style</DialogTitle>
+      <DialogContent aria-describedby="portfolio-style-description">
+        <DialogTitle className='text-center text-2xl font-bold'>
+          Choose Your Portfolio Style
+        </DialogTitle>
+        <DialogDescription id="portfolio-style-description" className="text-center text-sub-text">
+          Select your preferred investment style to get recommendations that match your risk tolerance and goals.
+        </DialogDescription>
+        
         {/* Modal Content */}
         <div className='pt-8'>  
           {/* Subtitle */}
@@ -72,7 +77,7 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
           </div>
           
           {/* Options */}
-          <div className="space-y-3 mb-8">
+          <div className="space-y-3 mb-8" role="radiogroup" aria-labelledby="portfolio-style-description">
             {portfolioStyles.map((style) => {
               const isSelected = selectedStyle === style.id;
               
@@ -83,16 +88,27 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
                     isSelected ? "bg-primary border-primary" : "bg-transparent border-primary"
                   }`}
                   onClick={() => handleStyleSelect(style.id)}
+                  role="radio"
+                  aria-checked={isSelected}
+                  aria-labelledby={`style-${style.id}-title`}
+                  aria-describedby={`style-${style.id}-desc`}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleStyleSelect(style.id);
+                    }
+                  }}
                 >
                   <div className="flex items-center">
                     <div className="flex-1">
                       <div className="flex items-center">
-                        {style.icon && <span className="mr-2">{style.icon}</span>}
-                        <h3 className="font-medium text-white">
+                        {style.icon && <span className="mr-2" aria-hidden="true">{style.icon}</span>}
+                        <h3 id={`style-${style.id}-title`} className="font-medium text-white">
                           {style.title}
                         </h3>
                       </div>
-                      <p className="text-sm text-white mt-1">
+                      <p id={`style-${style.id}-desc`} className="text-sm text-white mt-1">
                         {style.description}
                       </p>
                     </div>
@@ -103,14 +119,14 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
           </div>
           
           {/* Continue Button */}
-            <Button
-              variant="default"
-              onClick={handleConfirm}
-              disabled={!selectedStyle}
-              className="w-full"
-            >
-              Continue
-            </Button>
+          <Button
+            variant="default"
+            onClick={handleConfirm}
+            disabled={!selectedStyle}
+            className="w-full"
+          >
+            Continue
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
