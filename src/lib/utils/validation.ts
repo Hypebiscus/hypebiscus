@@ -7,7 +7,7 @@ export interface ChatMessage {
 
 export interface ChatRequestBody {
   messages: ChatMessage[]
-  poolData?: any
+  poolData?: Record<string, unknown>
   portfolioStyle?: string
 }
 
@@ -18,12 +18,12 @@ export class ValidationError extends Error {
   }
 }
 
-export function validateChatRequest(body: any): ChatRequestBody {
+export function validateChatRequest(body: unknown): ChatRequestBody {
   if (!body || typeof body !== 'object') {
     throw new ValidationError('Invalid request body')
   }
 
-  const { messages, poolData, portfolioStyle } = body
+  const { messages, poolData, portfolioStyle } = body as Record<string, unknown>
 
   // Validate messages array
   if (!messages || !Array.isArray(messages)) {
@@ -93,7 +93,11 @@ export function validateChatRequest(body: any): ChatRequestBody {
     }
   }
 
-  return { messages, poolData, portfolioStyle }
+  return { 
+    messages: messages as ChatMessage[], 
+    poolData: poolData as Record<string, unknown> | undefined, 
+    portfolioStyle: portfolioStyle as string | undefined 
+  }
 }
 
 export function sanitizeString(input: string): string {

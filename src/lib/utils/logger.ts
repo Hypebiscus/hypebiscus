@@ -17,7 +17,7 @@ interface SecurityEvent {
   type: 'WALLET_CONNECTION' | 'TRANSACTION_ATTEMPT' | 'API_ABUSE' | 'AUTH_FAILURE' | 'RATE_LIMIT_HIT';
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   context: LogContext;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 class SecureLogger {
@@ -54,7 +54,7 @@ class SecureLogger {
   /**
    * Sanitize sensitive data from log messages and objects
    */
-  private sanitize(data: any): any {
+  private sanitize(data: unknown): unknown {
     if (typeof data === 'string') {
       let sanitized = data;
       
@@ -72,7 +72,11 @@ class SecureLogger {
     }
 
     if (typeof data === 'object' && data !== null) {
-      const sanitized: any = Array.isArray(data) ? [] : {};
+      if (Array.isArray(data)) {
+        return data.map(item => this.sanitize(item));
+      }
+      
+      const sanitized: Record<string, unknown> = {};
       
       for (const [key, value] of Object.entries(data)) {
         // Skip sensitive keys entirely
@@ -141,7 +145,7 @@ class SecureLogger {
   /**
    * Log general application events with sanitization
    */
-  log(level: 'info' | 'warn' | 'error', message: string, data?: any): void {
+  log(level: 'info' | 'warn' | 'error', message: string, data?: unknown): void {
     const sanitizedData = data ? this.sanitize(data) : undefined;
     const logEntry = {
       level,
@@ -187,6 +191,9 @@ class SecureLogger {
         ...context,
         walletAddress,
         timestamp: new Date().toISOString(),
+      },
+      metadata: {
+        eventType
       }
     });
   }
@@ -194,7 +201,7 @@ class SecureLogger {
   /**
    * Send logs to external service (implement based on your chosen provider)
    */
-  private sendToExternalLogger(data: any): void {
+  private sendToExternalLogger(data: unknown): void {
     // Example implementations:
     
     // For Sentry:
@@ -216,9 +223,9 @@ export const logger = SecureLogger.getInstance();
 
 // Convenience methods
 export const logSecurityEvent = (event: SecurityEvent) => logger.logSecurityEvent(event);
-export const logInfo = (message: string, data?: any) => logger.log('info', message, data);
-export const logWarn = (message: string, data?: any) => logger.log('warn', message, data);
-export const logError = (message: string, data?: any) => logger.log('error', message, data);
+export const logInfo = (message: string, data?: unknown) => logger.log('info', message, data);
+export const logWarn = (message: string, data?: unknown) => logger.log('warn', message, data);
+export const logError = (message: string, data?: unknown) => logger.log('error', message, data);
 export const logWalletEvent = (
   walletAddress: string,
   eventType: 'CONNECTED' | 'DISCONNECTED' | 'TRANSACTION_SIGNED',
