@@ -146,7 +146,14 @@ export async function handleAsyncOperation<T>(
     return { data, error: null };
   } catch (error) {
     const classifiedError = classifyError(error);
-    console.error(`${context} failed:`, classifiedError);
+    // Log error safely without exposing sensitive details
+    console.error(`${context} failed:`, {
+      type: classifiedError.type,
+      message: classifiedError.userMessage,
+      code: classifiedError.code,
+      // Only include stack trace in development
+      ...(process.env.NODE_ENV === 'development' && { details: classifiedError.details })
+    });
     return { data: null, error: classifiedError };
   }
 }
@@ -159,8 +166,14 @@ export function useErrorHandler() {
     handleError: (error: unknown, context?: string) => {
       const appError = classifyError(error);
       
-      // Log error for debugging
-      console.error(`Error in ${context || 'component'}:`, appError);
+      // Log error for debugging without sensitive details
+      console.error(`Error in ${context || 'component'}:`, {
+        type: appError.type,
+        message: appError.userMessage,
+        code: appError.code,
+        // Only include stack trace in development
+        ...(process.env.NODE_ENV === 'development' && { details: appError.details })
+      });
       
       // You could integrate with a toast notification system here
       // toast.error(appError.userMessage);
@@ -176,7 +189,13 @@ export function useErrorHandler() {
         return await operation();
       } catch (error) {
         const appError = classifyError(error);
-        console.error(`Async error in ${context || 'operation'}:`, appError);
+        console.error(`Async error in ${context || 'operation'}:`, {
+          type: appError.type,
+          message: appError.userMessage,
+          code: appError.code,
+          // Only include stack trace in development
+          ...(process.env.NODE_ENV === 'development' && { details: appError.details })
+        });
         
         // You could show error UI here
         // toast.error(appError.userMessage);

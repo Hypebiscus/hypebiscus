@@ -2,7 +2,7 @@
 
 'use client'
 
-import { FC, ReactNode, useMemo } from 'react'
+import { FC, ReactNode, useMemo, useEffect } from 'react'
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react'
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base'
 import { 
@@ -21,7 +21,7 @@ interface WalletContextProviderProps {
 
 export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children }) => {
   // Get network from environment variable
-  const networkString = process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'mainnet-beta';
+  const networkString = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'mainnet-beta';
   const network = networkString === 'devnet' 
     ? WalletAdapterNetwork.Devnet 
     : networkString === 'testnet'
@@ -35,8 +35,12 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
     [network] // Include network dependency
   );
   
-  console.log(`Using Solana network: ${network}`);
-  console.log(`Using RPC endpoint: ${endpoint.split('/').slice(0, 3).join('/')}/...`); // Log only domain part for security
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Using Solana network: ${network}`)
+      console.log(`Using RPC endpoint: ${endpoint.split('/').slice(0, 3).join('/')}/...`)
+    }
+  }, [network, endpoint])
   
   // Only include non-Standard Wallet adapters
   // Phantom and Solflare are now Standard Wallets and will be auto-detected

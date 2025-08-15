@@ -8,7 +8,7 @@
   --foreground: white;
 
   --card: #ffffff;
-  --card-foreground: #0a0a0a;
+  --card-foreground: #161616;
 
   --popover: #ffffff;
   --popover-foreground: #0a0a0a;
@@ -229,6 +229,31 @@ ul li {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;  /* Chrome, Safari and Opera */
+}
+
+
+/* custom scrollbar for table in wallet page*/
+.styled-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  background: transparent;
+}
+.styled-scrollbar {
+  scrollbar-color: #333 transparent; /* Firefox */
+  scrollbar-width: none; /* Firefox: hide by default */
+}
+.styled-scrollbar:hover {
+  scrollbar-width: thin; /* Firefox: show thin scrollbar on hover */
+}
+.styled-scrollbar:hover::-webkit-scrollbar {
+  height: 8px;
+  background: #161616;
+}
+.styled-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: #161616;
+  border-radius: 4px;
+}
+.styled-scrollbar:not(:hover)::-webkit-scrollbar {
+  display: none;
 }
 
 

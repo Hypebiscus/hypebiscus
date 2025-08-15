@@ -33,6 +33,9 @@ export default function RootLayout({
           strategy="beforeInteractive"
           data-preload
           defer
+          // Note: Add SRI hash in production - check Jupiter docs for current hash
+          // integrity="sha384-HASH_HERE"
+          crossOrigin="anonymous"
         />
       </head>
       <body

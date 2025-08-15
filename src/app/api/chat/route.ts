@@ -1,11 +1,36 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { chatRateLimiter, getClientIP } from '@/lib/utils/rateLimiter';
+import { validateChatRequest, validateRequestSize, ValidationError } from '@/lib/utils/validation';
 
 // This handles POST requests to /api/chat
 export async function POST(request: Request) {
   try {
-    // Log that we received a request
-    console.log('API route: Received request');
+    // Validate request size first
+    validateRequestSize(request);
+    
+    // Rate limiting
+    const clientIP = getClientIP(request);
+    if (!chatRateLimiter.isAllowed(clientIP)) {
+      const remainingTime = Math.ceil(chatRateLimiter.getRemainingTime(clientIP) / 1000);
+      return NextResponse.json(
+        { 
+          error: 'Rate limit exceeded', 
+          message: `Too many requests. Please try again in ${remainingTime} seconds.` 
+        },
+        { 
+          status: 429,
+          headers: {
+            'Retry-After': remainingTime.toString(),
+            'X-RateLimit-Limit': '10',
+            'X-RateLimit-Remaining': '0'
+          }
+        }
+      );
+    }
+    
+    // Log that we received a request (without sensitive data)
+    console.log('API route: Received chat request from IP:', clientIP.replace(/\d+$/, 'xxx'));
     
     // Check if API key is configured
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -22,23 +47,42 @@ export async function POST(request: Request) {
       apiKey: apiKey,
     });
 
-    // Parse request body
-    const body = await request.json();
-    const { messages, poolData, portfolioStyle } = body;
-
-    console.log('API route: Request body', { 
-      messagesCount: messages?.length || 0,
-      hasPoolData: !!poolData,
-      portfolioStyle: portfolioStyle || 'none'
-    });
-
-    if (!messages || !Array.isArray(messages)) {
-      console.error('API route: Invalid request format');
+    // Parse and validate request body
+    let body;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { error: 'Invalid request format' },
+        { error: 'Invalid JSON in request body' },
         { status: 400 }
       );
     }
+
+    // Validate request structure and content
+    let validatedData;
+    try {
+      validatedData = validateChatRequest(body);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return NextResponse.json(
+          { 
+            error: 'Validation failed', 
+            message: error.message,
+            field: error.field 
+          },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
+
+    const { messages, poolData, portfolioStyle } = validatedData;
+
+    console.log('API route: Valid request', { 
+      messagesCount: messages.length,
+      hasPoolData: !!poolData,
+      portfolioStyle: portfolioStyle || 'none'
+    });
 
     // Format messages for Anthropic API
     const formattedMessages = messages.map(msg => ({
@@ -65,15 +109,27 @@ export async function POST(request: Request) {
             model: 'claude-3-haiku-20240307', 
             max_tokens: 1024,
             system: systemPrompt,
-            messages: [
-              ...formattedMessages,
-              // Add pool data as a virtual user message if provided
-              ...(poolData ? [{
-                role: 'user' as const,
-                content: `I need you to analyze this ${portfolioStyle || 'general'} crypto liquidity pool and provide insights: ${JSON.stringify(poolData)}. 
-                Format your response in clear bullet points, with each point starting on a new line. First, provide a brief introduction (1-2 sentences). Then list 3-5 bullet points explaining why this pool is appropriate for a ${portfolioStyle || 'general'} investor. After that, list 2-3 bullet points about risk considerations. Discuss the bin step (${poolData.binStep}) relevance, evaluate the risk level, explain potential returns, and highlight key metrics. Each bullet point should be concise and focused on one specific advantage or consideration.`
-              }] : [])
-            ],
+            messages: (() => {
+              const allMessages = [
+                ...formattedMessages,
+                // Add pool data as a virtual user message if provided
+                ...(poolData ? [{
+                  role: 'user' as const,
+                  content: `I need you to analyze this ${portfolioStyle || 'general'} crypto liquidity pool and provide insights: ${JSON.stringify(poolData)}. 
+                  Format your response in clear bullet points, with each point starting on a new line. First, provide a brief introduction (1-2 sentences). Then list 3-5 bullet points explaining why this pool is appropriate for a ${portfolioStyle || 'general'} investor. After that, list 2-3 bullet points about risk considerations. Discuss the bin step (${poolData.binStep}) relevance, evaluate the risk level, explain potential returns, and highlight key metrics. Each bullet point should be concise and focused on one specific advantage or consideration.`
+                }] : [])
+              ];
+              
+              // Ensure we always have at least one message for Anthropic API
+              if (allMessages.length === 0) {
+                allMessages.push({
+                  role: 'user' as const,
+                  content: 'Hello! I\'m interested in learning about DeFi and liquidity pools. Can you help me get started?'
+                });
+              }
+              
+              return allMessages;
+            })(),
             stream: true,
           });
 
@@ -85,7 +141,7 @@ export async function POST(request: Request) {
           }
           controller.close();
         } catch (error) {
-          console.error('API route: Error in streaming:', error);
+          console.error('API route: Error in streaming:', error instanceof Error ? error.message : 'Unknown error');
           controller.error(error);
         }
       }
@@ -100,10 +156,20 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error('API route: Error calling Anthropic API:', error);
+    // Log error without exposing sensitive details
+    console.error('API route: Error calling Anthropic API:', error instanceof Error ? error.message : 'Unknown error');
+    
+    // Return generic error message to prevent information disclosure
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ 
+        error: 'Validation failed', 
+        message: error.message 
+      }, { status: 400 });
+    }
+    
     return NextResponse.json({ 
-      error: 'Failed to get response from Claude API', 
-      details: error instanceof Error ? error.message : String(error)
+      error: 'Internal server error', 
+      message: 'Something went wrong processing your request. Please try again later.' 
     }, { status: 500 });
   }
 }
