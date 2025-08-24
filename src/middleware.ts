@@ -33,7 +33,7 @@ export function middleware(request: NextRequest) {
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     img-src 'self' data: https: blob:;
     font-src 'self' data: https://fonts.gstatic.com;
-    connect-src 'self' https://api.mainnet-beta.solana.com https://solana-mainnet.g.alchemy.com https://sly-virulent-owl.solana-mainnet.quiknode.pro https://terminal.jup.ag https://lite-api.jup.ag https://dlmm-api.meteora.ag https://cdn.jsdelivr.net wss:;
+    connect-src 'self' https://api.mainnet-beta.solana.com https://solana-mainnet.g.alchemy.com https://sly-virulent-owl.solana-mainnet.quiknode.pro https://terminal.jup.ag https://lite-api.jup.ag https://dlmm-api.meteora.ag https://cdn.jsdelivr.net https://mainnet.helius-rpc.com wss:;
     frame-src 'none';
     object-src 'none';
     base-uri 'self';
