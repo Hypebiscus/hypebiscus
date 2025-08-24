@@ -7,6 +7,7 @@ const ALLOWED_RPC_HOSTS = [
   'api.testnet.solana.com',
   'solana-mainnet.g.alchemy.com',
   'sly-virulent-owl.solana-mainnet.quiknode.pro', // QuikNode (should be replaced)
+  'mainnet.helius-rpc.com',
   'rpc.ankr.com'
 ]
 
