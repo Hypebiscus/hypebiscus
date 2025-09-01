@@ -236,9 +236,7 @@ export class MeteoraPositionService {
       case 'conservative':
         rangePatterns = [
           // Conservative: 67-69 bins (widest range, safest)
-          { width: 69, offset: 0, name: 'Conservative Max Range', popularity: 0.9 },
-          { width: 68, offset: 0, name: 'Conservative Wide Range', popularity: 0.8 },
-          { width: 67, offset: 0, name: 'Conservative Standard Range', popularity: 0.7 },
+            { width: 200, offset: 0, name: 'Full Range Bid-Ask', popularity: 0.9 },
         ];
         break;
         
