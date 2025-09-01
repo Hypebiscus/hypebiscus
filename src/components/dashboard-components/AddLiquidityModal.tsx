@@ -444,7 +444,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         minBinId: selectedRange.minBinId,
         maxBinId: selectedRange.maxBinId,
         strategyType: StrategyType.BidAsk,
-        useAutoFill: true
+        useAutoFill: false
       }, selectedRange);
       
       const transactionSignatures: string[] = [];
