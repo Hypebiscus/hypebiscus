@@ -836,7 +836,7 @@ const ChatBox: React.FC = () => {
   // Render component
   if (showWelcomeScreen) {
     return (
-      <div className="flex flex-col h-[calc(100vh-100px)] w-full max-w-4xl mx-auto px-4">
+      <div className="flex flex-col h-[calc(100vh-100px)] w-full max-w-4xl mx-auto">
         <div className="flex-1 flex flex-col items-center justify-start lg:p-4 p-0 mt-8 overflow-y-auto">
           <h1 className="text-2xl md:text-3xl font-bold text-primary mb-2 text-center">
             Welcome to Hypebiscus
@@ -850,7 +850,7 @@ const ChatBox: React.FC = () => {
               <div className="flex-shrink-0">
                 <Clock className="text-primary" size={18} />
               </div>
-              <p className="text-white text-sm break-words">
+              <p className="text-white text-xs md:text-sm break-words">
                 Real-time discovery of BTC and zBTC liquidity pools on Solana.
               </p>
             </div>
@@ -858,7 +858,7 @@ const ChatBox: React.FC = () => {
               <div className="flex-shrink-0">
                 <Plus className="text-primary" size={18} />
               </div>
-              <p className="text-white text-sm break-words">
+              <p className="text-white text-xs md:text-sm break-words">
                 Instant &apos;Add Position&apos; capability.
               </p>
             </div>
@@ -866,7 +866,7 @@ const ChatBox: React.FC = () => {
               <div className="flex-shrink-0">
                 <ChartLine className="text-primary" size={18} />
               </div>
-              <p className="text-white text-sm break-words">
+              <p className="text-white text-xs md:text-sm break-words">
                 Live pool analytics, including TVL, APR, and recent liquidity changes.
               </p>
             </div>
@@ -874,7 +874,7 @@ const ChatBox: React.FC = () => {
               <div className="flex-shrink-0">
                 <Wallet className="text-primary" size={18} />
               </div>
-              <p className="text-white text-sm break-words">
+              <p className="text-white text-xs md:text-sm break-words">
                 Secure, non-custodial wallet integration for direct on-chain transactions.
               </p>
             </div>
@@ -882,7 +882,7 @@ const ChatBox: React.FC = () => {
               <div className="flex-shrink-0">
                 <Shuffle className="text-primary" size={18} />
               </div>
-              <p className="text-white text-sm break-words">
+              <p className="text-white text-xs md:text-sm break-words">
                 Integrated Jupiter Terminal for seamless token swaps across all Solana DEXes.
               </p>
             </div>
