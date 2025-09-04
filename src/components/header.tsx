@@ -9,11 +9,15 @@ import {
   NavigationMenuLink,
   NavigationMenuList,
   NavigationMenuTrigger,
-} from "@/components/ui/navigation-menu"
-import {HouseIcon, LightningAIcon, WalletIcon, ListIcon} from "@phosphor-icons/react"
+} from "@/components/ui/navigation-menu";
+import {
+  HouseIcon,
+  LightningAIcon,
+  WalletIcon,
+  ListIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import Image from "next/image";
-
 
 // Dynamically import WalletMultiButton with ssr disabled
 const WalletMultiButton = dynamic(
@@ -33,32 +37,44 @@ const Header = () => {
 
   return (
     <div className="flex justify-between items-center lg:px-[70px] px-4 lg:pt-4 pt-2 lg:pb-0 pb-2">
-      <Image src="/hypebiscus_logo.png" alt="Hypebiscus" width={70} height={70} unoptimized/>
+      <div>
+        <Image
+          src="/hypebiscus_logo.png"
+          alt="Hypebiscus"
+          width={72}
+          height={72}
+          className="object-cover w-full h-[24px] md:h-[32px]"
+          unoptimized
+        />
+      </div>
+
       <div className="flex items-center gap-4">
         <NavigationMenu className="lg:hidden block">
           <NavigationMenuList>
             <NavigationMenuItem>
-              <NavigationMenuTrigger className="flex items-center gap-2"><ListIcon /></NavigationMenuTrigger>
+              <NavigationMenuTrigger className="flex items-center gap-2">
+                <ListIcon />
+              </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="flex flex-col gap-y-4 p-2">
                   <li>
                     <NavigationMenuLink asChild>
                       <Link href="/">
-                        <HouseIcon className="text-primary"/> Home
+                        <HouseIcon className="text-primary" /> Home
                       </Link>
                     </NavigationMenuLink>
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
                       <Link href="/wallet">
-                        <WalletIcon className="text-primary"/> Wallet
+                        <WalletIcon className="text-primary" /> Wallet
                       </Link>
                     </NavigationMenuLink>
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
                       <Link href="/bridge">
-                        <LightningAIcon className="text-primary"/> Bridge
+                        <LightningAIcon className="text-primary" /> Bridge
                       </Link>
                     </NavigationMenuLink>
                   </li>
