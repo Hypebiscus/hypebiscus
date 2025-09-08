@@ -1,5 +1,4 @@
 // src/lib/services/poolSearchService.ts
-// Updated interfaces and methods to fix TypeScript errors
 
 import { fetchPools } from '@/lib/api/pools';
 import { fetchMessage } from '@/lib/api/chat';
@@ -31,14 +30,14 @@ export interface PoolSearchResult {
   searchTerm: string;
 }
 
-// Updated interface to include tokenFilter
+// Fixed interface - made onError and handleAsyncError optional
 export interface PoolSearchParams {
   style: string | null;
   shownPoolAddresses: string[];
-  tokenFilter?: string; // Added this property
+  tokenFilter?: string;
   onLoadingMessage: (message: string) => void;
-  onError: (error: unknown) => void;
-  handleAsyncError: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>;
+  onError?: (error: unknown) => void;
+  handleAsyncError?: <T>(operation: () => Promise<T>, context?: string) => Promise<T | null>;
 }
 
 export interface ProcessPoolParams {
@@ -279,7 +278,20 @@ export class PoolSearchService {
    * Main pool search method with token filtering
    */
   public async searchPools(params: PoolSearchParams): Promise<ApiPool[]> {
-    const { onLoadingMessage, handleAsyncError, tokenFilter } = params;
+    const { onLoadingMessage, tokenFilter } = params;
+    
+    // Provide default error handlers if not provided
+    const handleAsyncError = params.handleAsyncError || (async <T>(operation: () => Promise<T>) => {
+      try {
+        return await operation();
+      } catch (error) {
+        console.error('Pool search error:', error);
+        if (params.onError) {
+          params.onError(error);
+        }
+        return null;
+      }
+    });
     
     // Display token-specific loading message
     const filterLabels: Record<string, string> = {
