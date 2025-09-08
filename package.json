@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.40.1",
     "@coral-xyz/anchor": "^0.31.1",
     "@coral-xyz/borsh": "^0.31.1",
+    "@jup-ag/plugin": "^1.0.4",
     "@jup-ag/terminal": "^4.4.2",
     "@meteora-ag/dlmm": "^1.5.4",
     "@phosphor-icons/react": "^2.1.7",
