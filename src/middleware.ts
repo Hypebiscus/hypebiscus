@@ -26,14 +26,14 @@ export function middleware(request: NextRequest) {
   // Add security headers to all responses
   const response = NextResponse.next()
   
-  // Content Security Policy (CSP)
+  // Content Security Policy (CSP) - Updated for Jupiter Plugin
   const cspHeader = `
     default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://terminal.jup.ag;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://plugin.jup.ag;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     img-src 'self' data: https: blob:;
     font-src 'self' data: https://fonts.gstatic.com;
-    connect-src 'self' https://api.mainnet-beta.solana.com https://solana-mainnet.g.alchemy.com https://sly-virulent-owl.solana-mainnet.quiknode.pro https://terminal.jup.ag https://lite-api.jup.ag https://dlmm-api.meteora.ag https://cdn.jsdelivr.net https://mainnet.helius-rpc.com wss:;
+    connect-src 'self' https://api.mainnet-beta.solana.com https://solana-mainnet.g.alchemy.com https://sly-virulent-owl.solana-mainnet.quiknode.pro https://plugin.jup.ag https://lite-api.jup.ag https://dlmm-api.meteora.ag https://cdn.jsdelivr.net https://mainnet.helius-rpc.com https://fonts.googleapis.com https://datapi.jup.ag https://ultra-api.jup.ag https://quote-api.jup.ag https://price.jup.ag wss:;
     frame-src 'none';
     object-src 'none';
     base-uri 'self';

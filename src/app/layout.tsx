@@ -29,17 +29,16 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <Script
-          src="https://terminal.jup.ag/main-v4.js"
-          strategy="beforeInteractive"
+          src="https://plugin.jup.ag/plugin-v1.js"
+          strategy="afterInteractive"
           data-preload
           defer
-          // Note: Add SRI hash in production - check Jupiter docs for current hash
-          // integrity="sha384-HASH_HERE"
           crossOrigin="anonymous"
         />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning={true}
       >
         <WalletContextProvider>
           {children}
